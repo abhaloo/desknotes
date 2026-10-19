@@ -1,0 +1,11 @@
+node_modules/
+dist/
+native/build/
+src/desktop/native-audio-manifest.json
+logs/
+logs/telemetry/
+graphify-out/
+*.log
+.env
+.env.*
+.delegate/

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "price-fifty",
+    "category": "pricing",
+    "question": "What would this cost us for about fifty reps?",
+    "must": ["$45", "seat", "next step"],
+    "traps": ["no discount or total that the sheet does not state"]
+  },
+  {
+    "id": "annual-discount",
+    "category": "pricing",
+    "question": "Is there a discount if we pay for the year up front?",
+    "must": ["two months", "next step"],
+    "traps": ["no percentage discount that the sheet does not state"]
+  },
+  {
+    "id": "salesforce-sync",
+    "category": "integration",
+    "question": "Does it sync with Salesforce, and does the data go both ways?",
+    "must": ["salesforce", "two-way", "next step"],
+    "traps": ["no objects beyond contacts, activities and deals"]
+  },
+  {
+    "id": "pipedrive",
+    "category": "integration",
+    "question": "We run everything in Pipedrive. Will that work?",
+    "must": ["pipedrive", "next step"],
+    "traps": ["must not claim a Pipedrive integration exists"]
+  },
+  {
+    "id": "security-sso",
+    "category": "security",
+    "question": "Are you SOC 2 compliant, and can we sign in with our SSO?",
+    "must": ["soc 2", "enterprise", "next step"],
+    "traps": ["SSO is Enterprise only"]
+  },
+  {
+    "id": "objection-recorder",
+    "category": "objection",
+    "question": "We already record all our calls, so why would we add another tool?",
+    "must": ["next step"],
+    "traps": ["must not criticise a named competitor"]
+  },
+  {
+    "id": "go-live",
+    "category": "onboarding",
+    "question": "How long would it take to get our whole team live?",
+    "must": ["weeks", "next step"],
+    "traps": ["2 to 3 weeks applies to Enterprise; Team is self-serve"]
+  },
+  {
+    "id": "healthcare-customers",
+    "category": "unknown",
+    "question": "Do you have other customers in healthcare we could talk to?",
+    "must": ["next step"],
+    "traps": ["the sheet names no customers: must not invent any"]
+  },
+  {
+    "id": "trial",
+    "category": "pricing",
+    "question": "Can we try it before we commit?",
+    "must": ["14", "trial", "next step"],
+    "traps": ["trial is up to 5 seats with no credit card"]
+  }
+]

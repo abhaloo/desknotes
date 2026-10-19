@@ -1,0 +1,6 @@
+{
+  "default": "sales",
+  "sets": {
+    "sales": "Sales calls"
+  }
+}

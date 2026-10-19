@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DeskNotes</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-mode="overlay">
+    <main class="panel">
+      <!-- Panel mode has no titlebar; this invisible strip is its drag handle (R6). -->
+      <div id="panel-drag" class="panel-drag" aria-hidden="true"></div>
+
+      <!-- Control-mode title row: brand, multi-answer, settings, hide. The
+           overlay has no settings dialog, so it keeps its own copy of the two
+           session pills in this row (spec item 4: overlay chrome unchanged). -->
+      <header class="titlebar panel-hidden">
+        <span class="brand">Sales Assistant</span>
+        <span id="status-pill-overlay" class="pill overlay-only" data-state="idle">idle</span>
+        <span id="realtime-pill-overlay" class="pill pill-ghost overlay-only" data-state="idle">link: idle</span>
+        <label class="toggle toggle-compact no-drag">
+          <input id="toggle-multi-answer" type="checkbox" />
+          <span>Multi-answer</span>
+        </label>
+        <!-- One opacity for every window. The 30% floor keeps every window findable. -->
+        <label class="opacity-control no-drag">
+          <span class="opacity-label" aria-hidden="true">Opacity</span>
+          <input id="window-opacity" class="no-drag" type="range" min="30" max="100" step="5" value="100" aria-label="Window opacity" aria-valuetext="100%" />
+        </label>
+        <div class="titlebar-actions no-drag control-only">
+          <button id="btn-settings" type="button" class="btn btn-icon no-drag" aria-label="Settings">⚙</button>
+        </div>
+        <button id="btn-hide" type="button" class="btn btn-icon no-drag" aria-label="Hide window">▾</button>
+      </header>
+
+      <!-- Rule 1: the single middle column. The titlebar above and the settings
+           dialog below are flex siblings, so neither is ever covered or clipped. -->
+      <div class="panel-scroll">
+
+        <section class="answer-card">
+          <header class="card-head panel-hidden">
+            <span class="card-title">Streaming answer</span>
+            <span id="answer-state" class="badge">idle</span>
+          </header>
+          <p id="answer-question" class="answer-question" hidden></p>
+          <div id="answer-text" class="answer-text">Waiting for the first question…</div>
+          <!-- Terms (terms-view.js): the jargon in the finished card, pinned under
+               the scrolling answer; hidden, and so no space, until its terms arrive. -->
+          <div id="answer-terms" class="answer-terms" aria-label="Terms" hidden></div>
+          <div id="screen-cards" class="screen-cards"></div>
+          <div class="card-actions panel-hidden">
+            <button id="btn-answer-now" type="button" class="btn">Answer now<span class="shortcut" id="hint-answer-now" hidden></span></button>
+            <button id="btn-screen" type="button" class="btn">Analyse screen</button>
+            <!-- Clears what every window shows; listening carries on. -->
+            <button id="btn-clear" type="button" class="btn" aria-label="Clear the answer, Prospect, You and screen cards in every window">Clear</button>
+          </div>
+        </section>
+
+        <!-- Splitters (layout-splitters.js): drag to resize, double-click or
+             Enter for the default, arrow keys to step. no-drag: a drag here
+             must resize the boxes, never move the window. -->
+        <div id="split-answer" class="splitter no-drag panel-hidden" role="separator" aria-orientation="horizontal" aria-label="Resize the answer and the transcript" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
+
+        <section class="lanes">
+          <article class="lane" data-lane="prospect">
+            <header class="lane-head">
+              <span id="dot-prospect" class="dot" aria-hidden="true"></span>
+              <span class="panel-hidden">Prospect</span>
+            </header>
+            <div id="lane-prospect" class="lane-lines"></div>
+          </article>
+          <div id="split-lanes" class="splitter no-drag panel-hidden" role="separator" aria-orientation="horizontal" aria-label="Resize Prospect and You" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
+          <article class="lane" data-lane="rep">
+            <header class="lane-head">
+              <span id="dot-rep" class="dot" aria-hidden="true"></span>
+              <span class="panel-hidden">You</span>
+            </header>
+            <div id="lane-rep" class="lane-lines panel-hidden"></div>
+          </article>
+        </section>
+
+        <p id="audio-overlay-summary" class="audio-summary overlay-only panel-hidden">Audio capture is idle.</p>
+
+        <!-- Slim, wrapped shortcut row: the only chrome below the lanes. -->
+        <footer class="hints shortcuts-row panel-hidden">
+          <ul id="shortcut-hints"></ul>
+        </footer>
+
+        <div id="toast" class="toast panel-hidden" popover="manual" hidden></div>
+
+      </div>
+
+      <!-- Overlay chrome (spec item 4): capture and click-through stay one click
+           away in the always-on-top window; control mode uses the dialog. -->
+      <footer class="overlay-footer overlay-only panel-hidden">
+        <label class="toggle">
+          <input id="toggle-capture-overlay" type="checkbox" />
+          <span>Audio capture</span>
+        </label>
+        <span id="click-through-pill-overlay" class="pill pill-ghost" data-state="off">click-through off</span>
+      </footer>
+
+      <!-- Everything below the "You" lane lives in this control-mode dialog. -->
+      <dialog id="settings-dialog" class="settings-dialog control-only" aria-label="Settings">
+        <header class="settings-head">
+          <span class="settings-title">Settings</span>
+          <button id="btn-settings-close" type="button" class="btn btn-icon">Close</button>
+        </header>
+        <div class="settings-body">
+          <section class="settings-section" aria-label="Session">
+            <h2 class="settings-heading">Session</h2>
+            <label class="toggle">
+              <input id="toggle-capture" type="checkbox" />
+              <span>Audio capture</span>
+            </label>
+            <label class="toggle">
+              <input id="toggle-click-through" type="checkbox" />
+              <span>Click-through</span>
+            </label>
+            <div class="settings-pills">
+              <span id="status-pill" class="pill" data-state="idle">idle</span>
+              <span id="realtime-pill" class="pill pill-ghost" data-state="idle">link: idle</span>
+              <span id="click-through-pill" class="pill pill-ghost" data-state="off">click-through off</span>
+            </div>
+            <p class="meta">Listening starts when the app opens until you turn it off here.</p>
+          </section>
+
+          <section class="settings-section" aria-label="Audio">
+            <h2 class="settings-heading">Audio</h2>
+            <section id="audio-panel" class="audio-panel control-only" aria-label="Audio devices">
+              <h3 class="card-title">Audio devices</h3>
+              <p id="audio-route" class="meta">Set your call application's output to the playback device selected here.</p>
+              <div class="audio-field">
+                <label for="audio-mic">Microphone</label>
+                <select id="audio-mic">
+                  <option value="default:communications">Default communications</option>
+                  <option value="default:multimedia">Default multimedia</option>
+                </select>
+              </div>
+              <div class="audio-field">
+                <label for="audio-system">Playback device</label>
+                <select id="audio-system">
+                  <option value="default:multimedia">Default multimedia</option>
+                  <option value="default:communications">Default communications</option>
+                </select>
+              </div>
+              <p id="audio-mic-status" class="meta">Microphone: idle</p>
+              <p id="audio-system-status" class="meta">Playback: idle</p>
+              <p id="audio-asr-status" class="meta">ASR unconfigured</p>
+              <p id="audio-levels" class="meta">Levels, drops, and discontinuities appear while capture is running.</p>
+              <p id="audio-resolved" class="meta"></p>
+              <p id="audio-headphones" class="audio-note">Use headphones. Speaker playback is unqualified when echo cancellation is unavailable or speaker echo is unresolved.</p>
+              <div class="audio-actions">
+                <button id="audio-retry" type="button" class="btn">Retry</button>
+                <button id="audio-export" type="button" class="btn">Export diagnostics</button>
+              </div>
+            </section>
+          </section>
+
+          <section class="settings-section" aria-label="Answer quality">
+            <h2 class="settings-heading">Answer quality</h2>
+            <!-- Values are answer-models.js ANSWER_MODEL_CHOICES (a test pins them). -->
+            <div class="audio-field">
+              <label for="answer-model">Answer model</label>
+              <select id="answer-model">
+                <option value="deepseek-flash-thinking">DeepSeek V4.1 Flash</option>
+                <option value="deepseek-flash">DeepSeek V4.1 Flash (fast)</option>
+                <option value="cerebras-qwen-thinking">Qwen 27B thinking (Cerebras)</option>
+              </select>
+            </div>
+            <p id="answer-model-note" class="meta">Applies from the next answer.</p>
+            <!-- Rep context (conversation-context.js): the rep's own mic speech reaches later answers. -->
+            <label class="toggle">
+              <input id="rep-context" type="checkbox" />
+              <span>Use what I say in answers</span>
+            </label>
+            <p class="meta">Later answers stay consistent with what you said on the call. Applies from the next answer.</p>
+            <!-- Highlights (src/shared/highlights.js): an answer's key phrases in orange. -->
+            <label class="toggle">
+              <input id="highlights" type="checkbox" />
+              <span>Highlight key phrases</span>
+            </label>
+            <p class="meta">Shows the most important words of an answer in orange. Applies from the next answer.</p>
+            <!-- Answer cards (src/shared/answer-cards.js): short answers with a VERDICT headline. -->
+            <label class="toggle">
+              <input id="answer-cards" type="checkbox" />
+              <span>Short answer cards</span>
+            </label>
+            <p class="meta">Shows short answers with a VERDICT headline. Applies from the next answer.</p>
+            <!-- Terms (src/server/engines/glossary.js): up to three terms explained under each answer. -->
+            <label class="toggle">
+              <input id="glossary" type="checkbox" />
+              <span>Explain terms</span>
+            </label>
+            <p class="meta">Explains up to three terms from each answer, below the answer. Terms in Known terms… are never explained. Applies from the next answer.</p>
+            <p id="glossary-note" class="meta" hidden></p>
+            <div class="audio-field">
+              <span class="field-label">Answer instructions file</span>
+              <p id="answer-instructions-path" class="meta path-text">…</p>
+              <div class="audio-actions">
+                <button id="btn-open-data-folder" type="button" class="btn">Open settings folder</button>
+                <button id="btn-open-known-terms" type="button" class="btn">Known terms…</button>
+              </div>
+            </div>
+            <p class="meta">Edit this text file to change the tone, the role and the answers for questions and screenshots. Saved changes apply to the next answer.</p>
+            <section class="meter">
+              <header class="card-head">
+                <span class="card-title">VAD gate</span>
+                <span id="vad-state" class="badge">idle</span>
+              </header>
+              <div class="meter-track" role="meter" aria-label="VAD open ratio">
+                <div id="vad-bar" class="meter-fill"></div>
+              </div>
+              <div id="vad-meta" class="meta">no audio yet</div>
+            </section>
+          </section>
+
+          <section class="settings-section" aria-label="Grounding">
+            <h2 class="settings-heading">Grounding</h2>
+            <section id="grounding-panel" class="audio-panel grounding-panel control-only" aria-label="Grounding document">
+              <h3 class="card-title">Grounding document</h3>
+              <p id="grounding-status" class="meta">No document. Answers use general knowledge.</p>
+              <div class="audio-actions">
+                <button id="grounding-load" type="button" class="btn">Load…</button>
+                <button id="grounding-clear" type="button" class="btn" disabled>Clear</button>
+              </div>
+              <p class="audio-note">The file picker shows on a shared screen. Load your document before you share.</p>
+              <p id="settings-note" class="meta" hidden></p>
+            </section>
+          </section>
+
+          <section class="settings-section" aria-label="Practice">
+            <h2 class="settings-heading">Practice</h2>
+            <section id="practice-panel" class="audio-panel practice-panel control-only" aria-label="Practice">
+              <h3 class="card-title">Practice / rehearsal</h3>
+              <p class="meta">Opens the practice window — a visible rehearsal surface with its own questions, answers and debrief.</p>
+              <div class="audio-actions">
+                <button id="btn-practice" type="button" class="btn">Open practice window</button>
+              </div>
+            </section>
+          </section>
+        </div>
+      </dialog>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

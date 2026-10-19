@@ -1,0 +1,1 @@
+REP lines in RECENT CONVERSATION are what the rep already said. Stay consistent with them and don't repeat them. Answer the prospect's latest question. If the DOCUMENTS contradict a REP line, add one short bullet that corrects it.

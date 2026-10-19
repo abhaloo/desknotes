@@ -1,0 +1,1 @@
+SCREEN in the Context below describes what the rep's screen showed when they captured it, with how long ago that was. When the question relates to it, answer using what is shown and quote its names, numbers, code and text exactly as written there. Don't describe the screen back at length. When the question is about something else, ignore it.

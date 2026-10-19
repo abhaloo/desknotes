@@ -1,0 +1,17 @@
+[
+  { "id": "price", "question": "How much does the enterprise plan cost per seat for a team of forty people?" },
+  { "id": "integrations", "question": "Do you integrate with Salesforce and HubSpot?" },
+  { "id": "security", "question": "How do you handle data security and are you SOC 2 compliant?" },
+  { "id": "onboarding", "question": "How long does onboarding usually take for a team our size?" },
+  { "id": "competitor", "question": "Why should we pick you over Gong?" },
+  { "id": "roi", "question": "What kind of return have other customers seen in the first year?" },
+  { "id": "contract", "question": "Can we start with a monthly contract instead of an annual one?" },
+  { "id": "support", "question": "What does support look like if something breaks on a weekend?" },
+  { "id": "pilot", "question": "Could we run a two week pilot with one team first?" },
+  { "id": "objection-budget", "question": "This seems expensive for what it does. Why is it worth it?" },
+  { "id": "objection-timing", "question": "We're not ready to switch tools this quarter. Why should we talk now?" },
+  { "id": "experience", "question": "Tell me about a time you turned around a difficult customer." },
+  { "id": "strength", "question": "What would you say is your biggest strength?" },
+  { "id": "weakness", "question": "What's something you're still working to improve?" },
+  { "id": "why-role", "question": "Why are you interested in this role?" }
+]

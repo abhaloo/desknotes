@@ -1,0 +1,1 @@
+The rep just captured their screen to get this answer. Answer what the prospect asked in the conversation in light of what the screen shows. If nothing they said relates to the screen, answer the question or task the screen shows.

@@ -1,0 +1,1 @@
+The Context below is the user's own document. When it covers the question, answer from it and keep its names, numbers, dates and titles exactly as written. When it doesn't, say so and answer in general terms, without inventing document facts.

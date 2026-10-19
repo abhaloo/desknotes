@@ -1,0 +1,226 @@
+[
+  {
+    "id": "greenhouse-realtime",
+    "category": "system-design",
+    "question": "Design a service for real-time remote monitoring and analytics for distributed commercial greenhouse facilities. POST /greenhouses/{greenhouseId}/sensors/data ingests sensor data (temperature, humidity, soil moisture) from millions of sensors across numerous facilities; GET /greenhouses/{greenhouseId}/dashboard returns a real-time analytics dashboard. Constraints: continuous ingestion and processing of data streams from millions of sensors; near-real-time processing with guaranteed consistency and traceability for auditing; high availability plus robust monitoring and alerting for system health and data anomalies.",
+    "constraints": ["continuous ingestion from millions of sensors", "near-real-time with guaranteed consistency", "traceability for auditing", "high availability", "monitoring and alerting for health and anomalies"],
+    "must": ["partition", "backpressure", "idempot", "retention", "monitor", "alert"],
+    "tradeoffs": ["consistency vs latency", "stream vs batch", "cost vs retention"],
+    "traps": ["no fixed throughput or latency figure can be promised without the fleet's actual rates", "no cloud service level agreement may be stated as fact"]
+  },
+  {
+    "id": "chat-platform",
+    "category": "system-design",
+    "question": "Design a chat service for one-to-one and group conversations with message history, delivery receipts and presence for 50 million daily users.",
+    "must": ["websocket", "fan-out", "ack", "order", "presence", "offline"],
+    "tradeoffs": ["fan-out on write vs fan-out on read", "strict ordering vs availability", "push vs polling"],
+    "traps": ["specific connection or message-size limits are deployment facts, not design facts"]
+  },
+  {
+    "id": "api-rate-limit",
+    "category": "system-design",
+    "question": "Design a distributed rate limiter in front of a public API gateway. Limits must hold across three regions, and a limiter outage must not take the API down.",
+    "constraints": ["limits hold across three regions", "limiter outage must not take the API down"],
+    "must": ["atomic", "clock", "region", "fail", "latency"],
+    "tradeoffs": ["central counter accuracy vs added latency", "fail-open vs fail-closed"],
+    "traps": ["a specific requests-per-second capacity cannot be asserted without hardware and traffic facts"]
+  },
+  {
+    "id": "metrics-observability",
+    "category": "system-design",
+    "question": "Design a metrics and alerting pipeline that ingests several million data points per second from a fleet of services and feeds dashboards and paging alerts.",
+    "must": ["cardinality", "aggregation", "retention", "downsampl", "alert"],
+    "tradeoffs": ["resolution vs storage cost", "freshness vs aggregation", "pull vs push collection"],
+    "traps": ["specific cardinality ceilings depend on the storage choice"]
+  },
+  {
+    "id": "job-queue-side-effects",
+    "category": "system-design",
+    "question": "Design a distributed job scheduler for background jobs such as email sends and billing runs. Jobs must not run twice with side effects, must retry on failure, and must not starve.",
+    "must": ["lease", "idempot", "retry", "backoff", "poison"],
+    "tradeoffs": ["at-least-once plus idempotency vs true exactly-once", "throughput vs fairness"],
+    "traps": ["exactly-once execution including external side effects cannot be guaranteed by the queue alone"]
+  },
+  {
+    "id": "multi-region-catalog",
+    "category": "system-design",
+    "question": "Design an active-active multi-region deployment for a product catalog service. Reads and writes must stay fast in every region and no accepted write may ever be lost.",
+    "constraints": ["fast reads and writes in every region", "no accepted write lost"],
+    "must": ["replication", "conflict", "quorum", "failover", "consensus"],
+    "tradeoffs": ["consistency vs latency", "single leader vs multi leader", "consistency vs availability under partition"],
+    "traps": ["low-latency writes everywhere plus no write lost cannot both hold under a network partition; a strong answer names the conflict"]
+  },
+  {
+    "id": "outbox-vs-dual-write",
+    "category": "data-consistency",
+    "question": "A service writes orders to its database and publishes OrderCreated events to a queue. Users see stale data whenever the publish fails. How do you make the write and the publish consistent?",
+    "must": ["outbox", "transaction", "consumer", "idempot", "cdc"],
+    "tradeoffs": ["dual write vs transactional outbox", "polling vs change data capture", "latency vs reliability"],
+    "traps": ["dual writes are not atomic and the answer must not claim they are safe"]
+  },
+  {
+    "id": "exactly-once-meaning",
+    "category": "data-consistency",
+    "question": "What does exactly-once processing mean in a stream pipeline, and how close can you actually get when the consumer calls a payment gateway?",
+    "must": ["at-least-once", "idempot", "dedup", "offset", "effect"],
+    "tradeoffs": ["throughput vs dedup cost", "checkpoint granularity vs reprocessing"],
+    "traps": ["no broker guarantees exactly-once across an external side effect such as a payment call"]
+  },
+  {
+    "id": "cache-fresh-prices",
+    "category": "data-consistency",
+    "question": "Design caching for a read-heavy product catalog where price changes must show up within five seconds.",
+    "constraints": ["price freshness within five seconds"],
+    "must": ["ttl", "invalidation", "stale", "cache", "stampede"],
+    "tradeoffs": ["hit rate vs freshness", "cache-aside vs write-through", "origin load vs invalidation complexity"],
+    "traps": ["caching and strict freshness conflict; the answer must name the conflict and pick a mechanism"]
+  },
+  {
+    "id": "zero-downtime-migration",
+    "category": "data-consistency",
+    "question": "You must change the shape of a database table used by dozens of services, with zero downtime and an instant rollback path. Walk through the migration.",
+    "constraints": ["zero downtime", "instant rollback"],
+    "must": ["expand", "contract", "backward", "backfill", "rollback"],
+    "tradeoffs": ["speed vs safety", "compatibility window length vs cleanup effort"]
+  },
+  {
+    "id": "p99-regression",
+    "category": "incident-debugging",
+    "question": "After a routine deploy, p99 latency on a read API tripled while CPU stayed flat. Walk through how you would find the cause.",
+    "must": ["deploy", "metric", "query", "pool", "trace"],
+    "tradeoffs": ["roll back first vs diagnose first", "more instrumentation vs local reproduction"],
+    "traps": ["the cause cannot be asserted from the description; the answer must present hypotheses and the evidence to collect"]
+  },
+  {
+    "id": "memory-growth",
+    "category": "incident-debugging",
+    "question": "A long-running service grows in memory until it is restarted every few days. How do you find the leak?",
+    "must": ["heap", "snapshot", "gc", "profil", "reproduc"],
+    "tradeoffs": ["mitigate with restarts vs root-cause", "sampling vs exact tracking"],
+    "traps": ["the runtime is unknown; the answer must not assume one specific tool as the only path"]
+  },
+  {
+    "id": "postmortem",
+    "category": "incident-debugging",
+    "question": "How do you run the postmortem for a two-hour outage that dropped 30% of requests?",
+    "must": ["timeline", "root cause", "action", "blameless", "monitor"],
+    "tradeoffs": ["speed of report vs completeness", "fix now vs fix systemically"]
+  },
+  {
+    "id": "api-evolution",
+    "category": "api-design",
+    "question": "You need to change a public REST API used by mobile apps you cannot force to update. How do you evolve it?",
+    "must": ["version", "deprecat", "compatib", "sunset", "contract"],
+    "tradeoffs": ["whole-API versions vs additive changes", "clean break vs long compatibility tail"],
+    "traps": ["specific deprecation durations are product policy, not engineering facts"]
+  },
+  {
+    "id": "idempotent-post",
+    "category": "api-design",
+    "question": "Design POST endpoints that stay safe when clients retry after timeouts. Money moves.",
+    "constraints": ["safe under client retries", "money moves"],
+    "must": ["idempot", "dedup", "conflict", "response", "timeout"],
+    "tradeoffs": ["storing full responses vs status only", "key retention window vs storage cost"],
+    "traps": ["safe retries cannot come from headers or client discipline alone; the server must store something"]
+  },
+  {
+    "id": "stable-pagination",
+    "category": "api-design",
+    "question": "Design pagination for a public API over a feed that changes constantly. Pages must not skip or repeat items.",
+    "constraints": ["no skipped or repeated items"],
+    "must": ["cursor", "offset", "stable", "index", "snapshot"],
+    "tradeoffs": ["offset vs cursor", "snapshot consistency vs freshness"],
+    "traps": ["no universal page-size limit is a fact"]
+  },
+  {
+    "id": "unknown-capacity",
+    "category": "honesty",
+    "question": "How many requests per second can one PostgreSQL instance handle?",
+    "must": ["depends", "hardware", "query", "workload", "measure"],
+    "tradeoffs": ["connection count vs throughput", "transactional vs analytics shapes"],
+    "traps": ["asserting a single number as fact is fabrication; a good answer names the factors and how to measure"]
+  },
+  {
+    "id": "unknown-sla",
+    "category": "honesty",
+    "question": "What end-to-end latency can we guarantee for an exactly-once event pipeline on a managed queue?",
+    "must": ["depends", "sla", "p99", "configur", "measure"],
+    "tradeoffs": ["throughput vs latency", "guarantees vs cost"],
+    "traps": ["no universal guarantee exists; contractual service levels and configurations vary"]
+  },
+  {
+    "id": "back-of-envelope",
+    "category": "honesty",
+    "question": "Estimate how much storage two million greenhouse sensors at one reading per minute need for two years of history.",
+    "must": ["assumption", "bytes", "replication", "compression", "retention"],
+    "tradeoffs": ["raw vs compressed retention", "hot vs cold tiers"],
+    "traps": ["the number must come with stated assumptions, not be presented as fact"]
+  },
+  {
+    "id": "personal-story",
+    "category": "honesty",
+    "question": "Tell me about the time you personally cut production p99 latency by half. What tools did you use?",
+    "must": ["measure", "profil", "approach"],
+    "tradeoffs": ["measure first vs change first"],
+    "traps": ["must not invent a personal story, employer, or specific past metrics"]
+  },
+  {
+    "id": "doc-partitions",
+    "category": "doc-anchored",
+    "question": "How is our telemetry topic partitioned, and how long do we keep raw sensor readings?",
+    "must": ["greenhouseid", "48", "400"],
+    "expect": ["keyed by greenhouseId", "48 partitions", "400 days"],
+    "tradeoffs": ["partition count vs rebalancing cost"]
+  },
+  {
+    "id": "doc-dashboard",
+    "category": "doc-anchored",
+    "question": "What does our dashboard read, and how fresh is it?",
+    "must": ["rollup", "5 second"],
+    "expect": ["rollups only", "every 5 seconds"],
+    "tradeoffs": ["freshness vs query cost"]
+  },
+  {
+    "id": "doc-audit",
+    "category": "doc-anchored",
+    "question": "How do we trace configuration changes for auditing?",
+    "must": ["audit", "actor", "timestamp"],
+    "expect": ["audit log", "actor and timestamp"],
+    "tradeoffs": ["audit completeness vs write cost"]
+  },
+  {
+    "id": "doc-dr",
+    "category": "doc-anchored",
+    "question": "What are our disaster recovery targets?",
+    "must": ["active-passive", "rto", "rpo"],
+    "expect": ["active-passive across two regions", "15 minute RTO", "RPO of one minute"],
+    "tradeoffs": ["recovery speed vs replication cost"]
+  },
+  {
+    "id": "followup-scale",
+    "category": "follow-up",
+    "question": "And how would that change if read traffic grew by a hundred times?",
+    "history": [
+      {
+        "q": "Design a chat service for one-to-one and group conversations with message history, delivery receipts and presence for 50 million daily users.",
+        "a": "I would keep connections on a websocket gateway tier and fan messages out per conversation, with history stored in a partitioned log so receipts and ordering stay consistent. Presence would live in memory with a short expiry and be served from a dedicated tier."
+      }
+    ],
+    "must": ["cache", "replica", "partition", "fan-out"],
+    "tradeoffs": ["read replicas vs caching", "shard count vs rebalancing"]
+  },
+  {
+    "id": "followup-retention",
+    "category": "follow-up",
+    "question": "And what happens to that retention if the compliance team requires seven years?",
+    "history": [
+      {
+        "q": "How is our telemetry topic partitioned, and how long do we keep raw sensor readings?",
+        "a": "The telemetry topic is keyed by greenhouseId and has 48 partitions. Raw readings are kept for 400 days, and the aggregator writes 5-second rollups that are kept for five years."
+      }
+    ],
+    "must": ["cold", "tier", "cost", "compliance"],
+    "expect": ["400 days"],
+    "tradeoffs": ["hot vs cold storage", "retention cost vs query needs"]
+  }
+]

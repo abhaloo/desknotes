@@ -1,0 +1,78 @@
+{
+  "name": "mock-sales-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/desktop/main.mjs",
+  "description": "DeskNotes: a sales copilot for live calls, with realtime transcription, early answer cards and editable prompts",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.1"
+  },
+  "scripts": {
+    "test": "bun scripts/run-tests.mjs",
+    "server": "bun src/server/main.js",
+    "demo": "bun scripts/demo.mjs",
+    "bench": "bun bench/latency.mjs",
+    "start:app": "electron src/desktop/main.mjs",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "build:native-audio": "node scripts/build-audio-native.mjs",
+    "test:native-audio": "node scripts/test-audio-native.mjs",
+    "test:audio:live": "electron test/live/wasapi-audio-probe.mjs",
+    "dist:win": "node scripts/build-audio-native.mjs && electron-builder --win portable",
+    "dist:win:installer": "node scripts/build-audio-native.mjs && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "1.30.0"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8",
+    "node-gyp": "13.1.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "onnxruntime-node@1.30.0": true
+  },
+  "build": {
+    "appId": "dev.desknotes.app",
+    "productName": "DeskNotes",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "prompts/**/*",
+      "third_party/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "third_party/**/*",
+      "**/node_modules/onnxruntime-node/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "native/build/Release/audio_capture.node",
+        "to": "audio_capture.node"
+      }
+    ],
+    "beforePack": "./scripts/before-pack-audio.mjs",
+    "afterPack": "./scripts/electron-fuses.mjs",
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "DeskNotes-${version}.exe"
+    }
+  }
+}

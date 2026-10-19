@@ -1,0 +1,26 @@
+{
+  "is_question": {
+    "type": "noul",
+    "instructions": "On a live sales call, `utterance` is what the prospect just said to the sales rep (`recent_prospect_lines`, when present, is what the prospect said before it). Is the prospect asking the rep a question, or raising an objection, concern or request that the rep should respond to now?",
+    "criteria": {
+      "true": "The prospect asks something, directly or indirectly (for example 'walk me through...', 'I'm worried about...', 'what does that cost'), or pushes back in a way that calls for an answer.",
+      "false": "Acknowledgement, agreement, filler, small talk, thinking aloud, or a statement that needs no answer (for example 'yeah that makes sense', 'let me check with my team', 'great, thanks')."
+    }
+  },
+  "answers_same": {
+    "type": "noul",
+    "instructions": "`answered_question` is the question an answer was already written for. `utterance` is the question the prospect actually asked; the transcript may differ by a few words. Would an answer written for `answered_question` fully and correctly answer `utterance`?",
+    "criteria": {
+      "true": "Same request: only wording, word order or transcription differences, and nothing in `utterance` that the answer would miss (for example 'pro tier' vs 'pro plan', 'how much is it per seat' vs 'what does it cost per seat').",
+      "false": "`utterance` asks for something more, less or different: another product, plan, number, competitor, integration, timeframe, or an added condition (for example 'Salesforce' vs 'Salesforce and HubSpot')."
+    }
+  },
+  "is_complete": {
+    "type": "noul",
+    "instructions": "On a live sales call, the prospect has just gone quiet. `utterance` is everything they said in this turn so far (`recent_prospect_lines`, when present, is what they said before it). Has the prospect finished their thought, so the rep can reply now without cutting them off?",
+    "criteria": {
+      "true": "The utterance is a complete sentence or question that stands on its own (for example 'how much does the enterprise plan cost per seat', 'we already use Salesforce, does it integrate?').",
+      "false": "The utterance stops mid-thought: it trails off on a connective, filler or unfinished clause, or announces more to come (for example 'so what I'm really wondering is', 'and also the', 'can you walk me through how the', 'there are two things')."
+    }
+  }
+}

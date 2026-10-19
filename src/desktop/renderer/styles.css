@@ -1,0 +1,1140 @@
+/* Overlay shell styling: dark glass panel, no chrome, readable over any call
+   window. Everything must survive a transparent window and click-through. */
+
+:root {
+  color-scheme: dark;
+  --bg: rgba(12, 15, 22, 0.92);
+  --panel: rgba(20, 24, 34, 0.86);
+  --panel-strong: rgba(15, 19, 27, 0.94);
+  --line: rgba(255, 255, 255, 0.09);
+  --text: #e8ecf4;
+  --muted: #97a2b8;
+  --accent: #5eead4;
+  --accent-soft: rgba(94, 234, 212, 0.16);
+  --warn: #fbbf24;
+  --bad: #f87171;
+  /* Key phrases in an answer (stream-paint.js HIGHLIGHT_CLASS): a deeper
+     orange than the "analysing screen" badge (#fdba74 on rgba(251, 146, 60)). */
+  --highlight: #f97316;
+  /* Floors for the adjustable boxes (layout-splitters.js reads these). */
+  --answer-min: 120px;
+  --lanes-min: 160px;
+  --lane-min: 56px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font: 13px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: transparent;
+  user-select: none;
+}
+
+body[data-mode="control"] {
+  background: #0b0d12;
+}
+
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+body[data-mode="control"] .panel {
+  border-radius: 0;
+  border: none;
+}
+
+/* Rule 1: the single in-flow scrolling region. The titlebar above and the
+   settings dialog (or the overlay's pinned footer) below are flex siblings, so
+   none of them is ever covered or clipped. */
+.panel-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Panel mode has no titlebar; this invisible strip keeps panels draggable (R6). */
+.panel-drag {
+  display: none;
+}
+
+body[data-mode="panel"] .panel-drag {
+  display: block;
+  height: 14px;
+  -webkit-app-region: drag;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: drag;
+}
+
+.no-drag,
+button,
+input,
+select {
+  -webkit-app-region: no-drag;
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pill,
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pill[data-state="active"],
+.pill[data-state="ended"],
+.pill[data-state="live"] {
+  color: var(--accent);
+  border-color: rgba(94, 234, 212, 0.4);
+  background: var(--accent-soft);
+}
+
+.pill[data-state="launching"],
+.pill[data-state="connecting"],
+.pill[data-state="reconnecting"] {
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.pill[data-state="failed"],
+.pill[data-state="ending"] {
+  color: var(--bad);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.pill-ghost {
+  border-style: dashed;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: inherit;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+}
+
+.btn-primary {
+  border-color: rgba(94, 234, 212, 0.5);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.btn-icon {
+  padding: 5px 8px;
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Title-row multi-answer control: one compact line, muted like the chrome. */
+.toggle-compact {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.toggle-compact input {
+  width: 12px;
+  height: 12px;
+}
+
+/* Title-row opacity slider: as compact and muted as the Multi-answer toggle. */
+.opacity-control {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.opacity-control input[type="range"] {
+  -webkit-app-region: no-drag;
+  width: 72px;
+  min-width: 48px;
+  height: 12px;
+  margin: 0;
+  accent-color: #2dd4bf;
+}
+
+/* Accelerator label inside action buttons (R5): muted, never a hardcoded key. */
+.shortcut {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.answer-card,
+.meter {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-head,
+.lane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.card-title {
+  font-weight: 600;
+}
+
+.answer-text {
+  min-height: 72px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.55;
+  background: var(--panel-strong);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+/* A `**` key phrase (src/shared/highlights.js): orange text only, no background. */
+.answer-text .hl,
+.practice-prose .hl {
+  color: var(--highlight);
+  font-weight: 500;
+}
+
+/* Answer cards (stream-paint.js): the VERDICT line is the headline, a line's
+   leading label is a quiet tag, and code keeps its shape. */
+.answer-text .ln.head,
+.practice-prose .ln.head {
+  font-size: 15px;
+  font-weight: 600;
+}
+.answer-text .ln.head .lbl,
+.answer-text .ln.lab .blt,
+.practice-prose .ln.head .lbl,
+.practice-prose .ln.lab .blt,
+.answer-text .ln.fence,
+.practice-prose .ln.fence {
+  display: none;
+}
+.answer-text .lbl,
+.practice-prose .lbl {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.answer-text .ln.code,
+.practice-prose .ln.code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.answer-question {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  /* One line (no tooltip: native tooltips can show on a shared screen). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.answer-question[hidden] {
+  display: none;
+}
+
+/* `inline code` in an answer (stream-paint.js INLINE_CODE_CLASS): monospace, backticks not shown. */
+.answer-text .ic,
+.practice-prose .ic {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.92em;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* An answer the engine cut short (turn.done `cut`): a quiet note after the last line. */
+.answer-text[data-cut]::after {
+  content: "Answer cut short.";
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Terms (terms-view.js): the finished card's jargon under the answer. Sticky
+   at the bottom of whichever box scrolls (the answer card in a split layout,
+   the panel column otherwise), so a long card cannot push it out of view.
+   Term and full name in the text colour; the explanation muted and smaller;
+   continuation lines hang under the term. */
+.answer-terms {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.answer-terms[hidden] {
+  display: none;
+}
+
+.answer-terms .term {
+  padding-left: 1.2em;
+  text-indent: -1.2em;
+  overflow-wrap: anywhere;
+}
+
+.answer-terms .term-name,
+.answer-terms .term-full {
+  color: var(--text);
+}
+
+.answer-terms .term-name {
+  font-weight: 600;
+}
+
+.answer-text.streaming::after {
+  content: "▌";
+  color: var(--accent);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+/* Loading line: the question is processed and an answer is on its way, but
+   no words have arrived yet (or a screen capture is being read). It sits on
+   its own line above any older answer text. */
+.answer-text.pending::before {
+  content: attr(data-loading) "...";
+  display: block;
+  color: var(--accent);
+  font-size: 13px;
+  animation: loading-dots 1.2s steps(1, end) infinite;
+}
+
+@keyframes loading-dots {
+  0% {
+    content: attr(data-loading);
+  }
+  25% {
+    content: attr(data-loading) ".";
+  }
+  50% {
+    content: attr(data-loading) "..";
+  }
+  75% {
+    content: attr(data-loading) "...";
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-text.pending::before {
+    animation: none;
+  }
+}
+
+@keyframes blink {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Item 2A: Resilient list and code styling for answers */
+.answer-text ul,
+.answer-text ol {
+  margin: 0.25rem 0 0.5rem 0;
+  padding-left: 1.25rem;
+  list-style-position: outside;
+}
+
+.answer-text ul li {
+  list-style-type: disc;
+  margin-bottom: 0.35rem;
+}
+
+.answer-text ol li {
+  list-style-type: decimal;
+  margin-bottom: 0.35rem;
+}
+
+.answer-text pre,
+.answer-text code {
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.answer-text pre {
+  padding: 8px;
+  margin: 0.4rem 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.answer-text pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lanes {
+  display: grid;
+  grid-template-columns: 1fr;
+  /* Rule 2: flex-sized with a px floor; the inner line lists keep their own
+     scroll (sized by flex) instead of clipping content or squeezing to a
+     32vh/34vh sliver. 160px floors ~2 transcript lines per lane; the outer
+     column scrolls whatever still does not fit. */
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 160px;
+}
+
+/* With a splitter between them the lanes need explicit rows: Prospect, the
+   handle, You. Panel windows have no handle and keep the auto rows. */
+body:not([data-mode="panel"]) .lanes {
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+/* ---------------------------------------------------- adjustable boxes ---
+   layout-splitters.js sets a share as flex-grow / fr weights. The floors keep
+   every box usable; at a window too short for the floors the outer column
+   scrolls, as it does without a saved size. */
+.panel-scroll.split-answer .answer-card {
+  flex: var(--answer-grow, 30) 1 0px;
+  min-height: var(--answer-min);
+  /* Wrapped action rows in a narrow, short card scroll instead of spilling. */
+  overflow-y: auto;
+}
+
+.panel-scroll.split-answer .answer-card .answer-text {
+  flex: 1 1 0px;
+  min-height: 48px;
+}
+
+.panel-scroll.split-answer .answer-card .screen-cards {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.panel-scroll.split-answer .answer-card .screen-cards:not(:empty) {
+  min-height: 56px;
+}
+
+.panel-scroll.split-answer .lanes {
+  flex: var(--lanes-grow, 70) 1 0px;
+  min-height: var(--lanes-min);
+}
+
+body:not([data-mode="panel"]) .lanes.split-lanes {
+  grid-template-rows:
+    minmax(var(--lane-min), var(--prospect-fr, 1fr))
+    auto
+    minmax(var(--lane-min), var(--rep-fr, 1fr));
+}
+
+.splitter {
+  -webkit-app-region: no-drag;
+  position: relative;
+  flex: 0 0 auto;
+  height: 10px;
+  /* Sits inside the column gaps, so the boxes keep their usual spacing. */
+  margin: -6px 0;
+  cursor: row-resize;
+  touch-action: none;
+  border-radius: 4px;
+}
+
+.lanes > .splitter {
+  margin: -4px 0;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition: background 120ms ease, width 120ms ease;
+}
+
+.splitter:hover::before,
+.splitter:focus-visible::before,
+body.is-resizing .splitter::before {
+  width: 56px;
+  background: var(--accent);
+}
+
+.splitter:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+
+body.is-resizing,
+body.is-resizing * {
+  cursor: row-resize !important;
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.lane[data-lane="rep"] {
+  border-color: rgba(94, 234, 212, 0.18);
+}
+
+.lane-lines {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.line {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.line.interim {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Screen analysis cards: one per result, numbered, in the answer area. */
+.screen-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.screen-cards:empty {
+  display: none;
+}
+
+.screen-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid rgba(94, 234, 212, 0.28);
+  border-radius: 8px;
+  background: rgba(94, 234, 212, 0.06);
+}
+
+.screen-card[data-status="failed"] {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.screen-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.screen-card-title,
+.screen-card-badges {
+  flex: none;
+}
+
+.screen-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.screen-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 4px;
+}
+
+/* Answer badge: green while an answer streams, orange the instant a screen
+   capture starts until its reading lands. */
+#answer-state[data-state="active"] {
+  color: var(--accent);
+  border-color: rgba(94, 234, 212, 0.4);
+  background: var(--accent-soft);
+}
+
+#answer-state[data-state="pending"] {
+  color: var(--accent);
+  border-color: rgba(94, 234, 212, 0.4);
+  background: var(--accent-soft);
+  animation: answer-pending-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes answer-pending-pulse {
+  50% {
+    background: rgba(94, 234, 212, 0.3);
+  }
+}
+
+#answer-state[data-state="screen"] {
+  color: #fdba74;
+  border-color: rgba(251, 146, 60, 0.65);
+  background: rgba(251, 146, 60, 0.18);
+  animation: screen-busy-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes screen-busy-pulse {
+  50% {
+    background: rgba(251, 146, 60, 0.34);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #answer-state[data-state="screen"],
+  #answer-state[data-state="pending"] {
+    animation: none;
+  }
+}
+
+.badge.screen-dedup {
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.screen-card-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.screen-card-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.screen-card[data-status="failed"] .screen-card-note {
+  color: var(--bad);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.dot.speaking {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.15);
+}
+
+.meter-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 200ms ease;
+}
+
+.meter-fill.failed-open {
+  background: var(--warn);
+}
+
+.meter-fill.gated {
+  background: var(--muted);
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Overlay-only pinned footer: capture and click-through stay one click away
+   in the always-on-top window; control mode uses the dialog. */
+.overlay-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toggle input {
+  accent-color: #2dd4bf;
+}
+
+/* Slim shortcut row under the lanes: one wrapped line of kbd chips. */
+.hints {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.hints ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.hints li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hints kbd {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Each hint is a small button chip: the same action as its keys, one click
+   away, and it looks clickable (border, fill, hover and press states). */
+.hint-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 7px 2px 3px;
+  font: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.hint-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.hint-btn:active {
+  background: rgba(94, 234, 212, 0.28);
+}
+
+.hint-btn:hover kbd {
+  border-color: var(--accent);
+}
+
+.hint-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.toast {
+  /* Manual popover (see index.html): the toast lives in the top layer, so it
+     stays visible while the settings <dialog> is open. In-flow + z-index could
+     never beat the dialog, which is modal and therefore on top. */
+  position: fixed;
+  inset: auto auto 16px 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 32px));
+  z-index: 4; /* fallback only: the top layer ignores stacking order */
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(30, 20, 20, 0.95);
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.toast[data-kind="info"] {
+  background: rgba(16, 32, 32, 0.95);
+  color: var(--accent);
+}
+
+/* Overlay mode is the compact always-on-top panel; control mode adds the
+   session buttons that would only clutter the overlay. */
+body[data-mode="overlay"] .control-only {
+  display: none;
+}
+
+/* Panel mode (R2): only the question, the answer and the speaking dots. */
+body[data-mode="panel"] .control-only {
+  display: none !important;
+}
+
+body[data-mode="panel"] .panel-hidden {
+  display: none !important;
+}
+
+/* Settings dialog (control window only): native <dialog> in the top layer, so
+   the single .panel-scroll region stays the only in-flow scroller. */
+.settings-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(82vh, 720px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-strong);
+  color: var(--text);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  -webkit-app-region: no-drag;
+}
+
+.settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-dialog:not([open]) {
+  display: none;
+}
+
+.settings-dialog::backdrop {
+  background: rgba(4, 6, 10, 0.62);
+}
+
+/* R2: the dialog itself is control-mode chrome; overlay/panel render as before. */
+body[data-mode="overlay"] #settings-dialog,
+body[data-mode="panel"] #settings-dialog {
+  display: none !important;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+.settings-title {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+}
+
+/* Grouped cards: same visual language as .lane / .answer-card. */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.settings-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.settings-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The VAD card is already inside an "Answer quality" card: flatten it. */
+.settings-section .meter {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.audio-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.audio-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.audio-field label,
+.audio-field .field-label {
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* A long Windows path wraps instead of widening the dialog; it stays selectable to copy. */
+.path-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+#answer-model-note[data-state="error"] {
+  color: var(--warn);
+}
+
+.audio-field select,
+.audio-actions .btn {
+  width: 100%;
+  max-width: 100%;
+}
+
+.audio-field select {
+  font: inherit;
+  color: var(--text);
+  background: #12151c;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.audio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audio-note,
+.audio-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.titlebar {
+  flex-wrap: wrap;
+}
+
+body[data-mode="control"] .overlay-only {
+  display: none;
+}
+
+/* Rule 4: long tokens wrap instead of pushing the layout sideways. */
+.answer-text,
+.line,
+.screen-card-note,
+.audio-note,
+.audio-summary,
+.meta {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .panel {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .panel-scroll {
+    gap: 8px;
+  }
+
+  /* Every button/label row wraps rather than overflowing its narrow window. */
+  .titlebar,
+  .overlay-footer,
+  .card-actions,
+  .audio-actions,
+  .screen-card-head,
+  .screen-card-badges {
+    flex-wrap: wrap;
+  }
+
+  /* Lanes stack in one column and long labels ellipsize rather than overflow. */
+  .lanes {
+    grid-template-columns: 1fr;
+  }
+
+  .brand {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-title,
+  .screen-card-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Grounding panel: errors in the status line and the settings note. */
+#grounding-status[data-state="error"],
+#settings-note {
+  color: #f87171;
+}
+
+/* Practice / rehearsal window: an honest study surface, visually distinct.
+   The base shell clips overflow (overlay discipline); the practice page is a
+   long, scrollable document, and its text is the user's own study material. */
+body[data-mode="practice"] {
+  background: #10141c;
+  color: #e8ecf4;
+  overflow-y: auto;
+  user-select: text;
+}
+.practice-banner {
+  padding: 10px 16px;
+  background: #1d2a44;
+  color: #cfe0ff;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.practice-textarea {
+  width: 100%;
+  font: inherit;
+  background: #0b0d12;
+  color: inherit;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+  padding: 8px;
+}
+.practice-answer { margin: 12px 0; }
+.practice-question { display: block; font-size: 1.05em; }
+.practice-meta { margin: 2px 0 6px; font-size: 0.85em; opacity: 0.75; }
+.practice-prose p { margin: 0 0 8px; line-height: 1.5; }
+.practice-debrief-text {
+  white-space: pre-wrap;
+  font: inherit;
+  background: #0b0d12;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+  padding: 12px;
+}

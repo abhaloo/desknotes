@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WASAPI audio probe</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'sha256-4a9p0ZkQ71I2i7kRxEvpkhPodb0eES6Ib1k5+k1hHdE='; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none';"
+    />
+    <style>
+      body { font: 16px/1.4 sans-serif; margin: 24px; max-width: 40rem; }
+      button { font: inherit; margin: 0 8px 8px 0; }
+      button:focus { outline: 2px solid #146; outline-offset: 2px; }
+      #probe-status { min-height: 3rem; }
+    </style>
+  </head>
+  <body>
+    <h1>WASAPI audio probe</h1>
+    <p>This page does not record on load. Press a Start button to begin that case.</p>
+    <p id="probe-status" role="status">Idle. Microphone recording has not started.</p>
+    <button id="start-catalog" type="button">Start catalog</button>
+    <button id="start-qualification" type="button">Start qualification</button>
+    <!-- Classic script: Chromium does not load a module script from a file URL. -->
+    <script>
+(function () {
+  function setStatus(text) {
+    var status = document.getElementById("probe-status");
+    if (status) status.textContent = text;
+  }
+  document.getElementById("start-catalog").addEventListener("click", function () {
+    setStatus("Catalog requested. Device listing does not start recording.");
+  });
+  document.getElementById("start-qualification").addEventListener("click", function () {
+    setStatus("Qualification requested. Recording starts only after this click.");
+  });
+})();
+    </script>
+  </body>
+</html>

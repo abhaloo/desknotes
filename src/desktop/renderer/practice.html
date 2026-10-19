@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Same CSP as index.html: no network, no frames, no plugins, no inline code. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DeskNotes — Practice</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-mode="practice">
+    <header class="practice-banner">Practice mode — rehearsal. This window is visible on your screen and in screen shares.</header>
+
+    <section class="practice-intake" aria-label="Practice material">
+      <h2 class="card-title">Problem statement</h2>
+      <p id="material-status" class="meta">No problem statement yet. Paste one before you start.</p>
+      <textarea id="material-text" class="practice-textarea" rows="6"
+        placeholder="Paste the problem statement (for example a system-design prompt)…"></textarea>
+      <div class="audio-actions">
+        <button id="material-save" type="button" class="btn">Save problem statement</button>
+        <button id="practice-start" type="button" class="btn btn-primary">Start practice</button>
+        <button id="practice-end" type="button" class="btn" disabled>End practice</button>
+      </div>
+      <p id="session-summary" class="meta">No practice session yet.</p>
+    </section>
+
+    <section class="practice-blocks" aria-label="Questions and answers">
+      <h2 class="card-title">Questions and answers</h2>
+      <div id="answer-blocks"></div>
+    </section>
+
+    <section class="practice-debrief" aria-label="Debrief">
+      <h2 class="card-title">Debrief</h2>
+      <p id="debrief-status" class="meta">The debrief is written when you end the practice session.</p>
+      <pre id="debrief-text" class="practice-debrief-text" hidden></pre>
+    </section>
+
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="practice.js"></script>
+  </body>
+</html>
