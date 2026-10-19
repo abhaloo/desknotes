@@ -12,6 +12,16 @@ before the other person finishes their sentence.
 DeskNotes is an engineering project, not a finished product. Read
 [Responsible use](#responsible-use) before you use it on a real call.
 
+**Who it's for:** sales reps and solutions engineers on video or phone calls
+who want the answer to the prospect's question on screen while they talk.
+
+**Built with:** Electron (desktop shell and overlay), JavaScript on Node and
+Bun (embedded realtime server and tests), a C++ N-API addon for Windows audio
+capture (WASAPI), a local Silero VAD model (ONNX Runtime), and hosted APIs for
+speech to text (Groq Whisper) and answers (DeepSeek or Cerebras).
+
+**What's next:** see [ROADMAP.md](ROADMAP.md).
+
 ## What it does
 
 - **Hears both sides of the call.** It captures your microphone and your
@@ -120,7 +130,8 @@ setx GROQ_API_KEY "your-key"
 ```
 
 You don't need to restart your terminal: DeskNotes also reads user variables
-that you saved after the terminal opened.
+that you saved after the terminal opened. [.env.example](.env.example) lists
+every variable with a short note; never commit real values.
 
 | Variable | What it powers | Needed |
 |---|---|---|

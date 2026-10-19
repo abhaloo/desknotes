@@ -9,3 +9,4 @@ graphify-out/
 .env
 .env.*
 .delegate/
+!.env.example
