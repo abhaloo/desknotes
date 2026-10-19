@@ -46,7 +46,7 @@ function manifestFor(bytes, patch = {}) {
     apiVersion: 1,
     napiVersion: 8,
     arch: "x64",
-    electronTarget: "33.4.11",
+    electronTarget: "44.9.0",
     ...patch,
   };
 }

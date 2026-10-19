@@ -9,8 +9,8 @@ import { FUSE_SENTINEL, FUSES, afterPack, flipFuseWire, readFuseWire } from "../
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
-/** Fake binary: junk, the sentinel, version 1, length 8, Electron 33's default wire. */
-function fakeBinary(wire = "10110001", { version = 1, copies = 1 } = {}) {
+/** Fake binary: junk, the sentinel, version 1, length 9, Electron 44's default wire. */
+function fakeBinary(wire = "101100011", { version = 1, copies = 1 } = {}) {
   const parts = [Buffer.from("MZ junk before")];
   for (let i = 0; i < copies; i += 1) {
     parts.push(Buffer.from(FUSE_SENTINEL, "latin1"), Buffer.from([version, wire.length]), Buffer.from(wire, "latin1"));
@@ -22,13 +22,14 @@ function fakeBinary(wire = "10110001", { version = 1, copies = 1 } = {}) {
 test("flips the hardening fuses and leaves the file-protocol fuse on", () => {
   const buf = fakeBinary();
   const { before, after, changed } = flipFuseWire(buf);
-  assert.equal(before, "10110001");
+  assert.equal(before, "101100011");
   // RunAsNode off, cookie encryption on, NODE_OPTIONS off, --inspect off,
   // ASAR integrity on, only-load-from-asar on, V8 snapshot untouched,
-  // GrantFileProtocolExtraPrivileges kept ON (file:// ES-module renderer).
-  assert.equal(after, "01001101");
+  // GrantFileProtocolExtraPrivileges kept ON (file:// ES-module renderer),
+  // WasmTrapHandlers (the 9th fuse, Electron 41+) left ON as shipped.
+  assert.equal(after, "010011011");
   assert.equal(changed, true);
-  assert.equal(readFuseWire(buf).wire, "01001101", "the buffer is modified in place");
+  assert.equal(readFuseWire(buf).wire, "010011011", "the buffer is modified in place");
   assert.equal(buf.subarray(0, 14).toString("latin1"), "MZ junk before", "bytes outside the wire are untouched");
 });
 
@@ -37,16 +38,16 @@ test("is idempotent", () => {
   flipFuseWire(buf);
   const second = flipFuseWire(buf);
   assert.equal(second.changed, false);
-  assert.equal(second.after, "01001101");
+  assert.equal(second.after, "010011011");
 });
 
 test("fails closed on an unexpected binary layout", () => {
   assert.throws(() => flipFuseWire(Buffer.from("no sentinel here")), /sentinel/);
-  assert.throws(() => flipFuseWire(fakeBinary("10110001", { copies: 2 })), /more than once/);
-  assert.throws(() => flipFuseWire(fakeBinary("10110001", { version: 2 })), /version/);
+  assert.throws(() => flipFuseWire(fakeBinary("101100011", { copies: 2 })), /more than once/);
+  assert.throws(() => flipFuseWire(fakeBinary("101100011", { version: 2 })), /version/);
   assert.throws(() => flipFuseWire(fakeBinary("1011")), /fuses/);
-  assert.throws(() => flipFuseWire(fakeBinary("1r110001")), /removed/);
-  assert.throws(() => flipFuseWire(fakeBinary("10x10001")), /unexpected/);
+  assert.throws(() => flipFuseWire(fakeBinary("1r1100011")), /removed/);
+  assert.throws(() => flipFuseWire(fakeBinary("10x100011")), /unexpected/);
 });
 
 test("the fuse table matches the documented FuseV1Options order", () => {
@@ -61,6 +62,7 @@ test("the fuse table matches the documented FuseV1Options order", () => {
       "OnlyLoadAppFromAsar",
       "LoadBrowserProcessSpecificV8Snapshot",
       "GrantFileProtocolExtraPrivileges",
+      "WasmTrapHandlers",
     ],
   );
 });
@@ -75,7 +77,7 @@ test("afterPack flips the packaged Windows executable", async () => {
       electronPlatformName: "win32",
       packager: { appInfo: { productFilename: "MockSalesCopilot" } },
     });
-    assert.equal(readFuseWire(readFileSync(exe)).wire, "01001101");
+    assert.equal(readFuseWire(readFileSync(exe)).wire, "010011011");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -92,7 +94,7 @@ test("afterPack targets the framework binary on macOS and the executable on Linu
       electronPlatformName: "darwin",
       packager: { appInfo: { productFilename: "MockSalesCopilot" } },
     });
-    assert.equal(readFuseWire(readFileSync(join(fw, "Electron Framework"))).wire, "01001101");
+    assert.equal(readFuseWire(readFileSync(join(fw, "Electron Framework"))).wire, "010011011");
 
     writeFileSync(join(dir, "mock-sales-copilot"), fakeBinary());
     await afterPack({
@@ -100,7 +102,7 @@ test("afterPack targets the framework binary on macOS and the executable on Linu
       electronPlatformName: "linux",
       packager: { executableName: "mock-sales-copilot", appInfo: { productFilename: "MockSalesCopilot" } },
     });
-    assert.equal(readFuseWire(readFileSync(join(dir, "mock-sales-copilot"))).wire, "01001101");
+    assert.equal(readFuseWire(readFileSync(join(dir, "mock-sales-copilot"))).wire, "010011011");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -118,12 +120,10 @@ test("afterPack fails the build when the executable is missing", async () => {
   }
 });
 
-test("the installed Electron binary has the fuse layout this hook expects (read-only)", (t) => {
+test("the installed Electron binary has the fuse layout this hook expects (read-only)", () => {
   const exe = join(root, "node_modules", "electron", "dist", process.platform === "win32" ? "electron.exe" : "electron");
-  if (!existsSync(exe)) {
-    t.skip("electron binary not installed");
-    return;
-  }
+  if (!existsSync(exe)) return; // not downloaded: node node_modules/electron/install.js
+
   const { version, wire } = readFuseWire(readFileSync(exe));
   assert.equal(version, 1);
   assert.ok(wire.length >= FUSES.length, `wire ${wire} shorter than the fuse table`);

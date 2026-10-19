@@ -7,9 +7,9 @@
  * --inspect, or swap the app code next to it. All of those run with the
  * app's identity, which is trusted with call audio, screenshots and keys.
  *
- * WHY a hand-rolled flipper: electron-builder 25 has no `electronFuses`
- * option (it arrived in 26), and the package rules allow no new
- * dependencies. The fuse wire is a documented, stable format:
+ * WHY a hand-rolled flipper: electron-builder 26 has `electronFuses`, but this
+ * flipper is kept because it fails closed on an unexpected fuse layout.
+ * The fuse wire is a documented, stable format:
  * sentinel, u8 version (1), u8 length, then one ASCII byte per fuse
  * ('0' off, '1' on, 'r' removed). Anything unexpected fails the build:
  * shipping without fuses must never be silent.
@@ -28,6 +28,8 @@ const REMOVED = 0x72;
  * GrantFileProtocolExtraPrivileges stays ON for now: the renderer is loaded
  * from file:// with ES modules, which need those privileges. Moving to a
  * custom app:// protocol (phase 2) lets it go OFF.
+ * WasmTrapHandlers (Electron 41 and later, the 9th fuse) stays as shipped:
+ * V8 uses it to trap out-of-bounds WebAssembly access.
  */
 export const FUSES = Object.freeze([
   { name: "RunAsNode", want: false },
@@ -38,6 +40,7 @@ export const FUSES = Object.freeze([
   { name: "OnlyLoadAppFromAsar", want: true },
   { name: "LoadBrowserProcessSpecificV8Snapshot", want: null },
   { name: "GrantFileProtocolExtraPrivileges", want: null },
+  { name: "WasmTrapHandlers", want: null },
 ]);
 
 /** @param {Buffer} buf */

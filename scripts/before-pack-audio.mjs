@@ -14,7 +14,7 @@ const EXPECTED = Object.freeze({
   arch: "x64",
   apiVersion: 1,
   napiVersion: 8,
-  electronTarget: "33.4.11",
+  electronTarget: "44.9.0",
 });
 
 function fail(message) {
@@ -81,7 +81,7 @@ export function validateNativeAudioPackage({
   if (manifest.napiVersion !== EXPECTED.napiVersion) fail("native audio manifest napiVersion must be 8");
   if (manifest.arch !== EXPECTED.arch) fail('native audio manifest arch must be "x64"');
   if (manifest.electronTarget !== EXPECTED.electronTarget) {
-    fail('native audio manifest electronTarget must be "33.4.11"');
+    fail('native audio manifest electronTarget must be "44.9.0"');
   }
   const actual = createHash("sha256").update(readFileSync(addon)).digest("hex");
   if (actual !== sha256) fail("native audio addon hash does not match the manifest");

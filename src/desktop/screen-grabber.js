@@ -3,7 +3,8 @@
  *
  * `desktopCapturer.getSources` with a full-size thumbnail runs on Electron's
  * main thread: ~1.9 s for the first call and ~350 ms for every later one,
- * measured on Electron 33 / Windows. The main thread also runs the VAD gate,
+ * measured on Electron 33 / Windows (not re-measured on Electron 44, which
+ * bundles Node 24). The main thread also runs the VAD gate,
  * the audio uplink and the answer-token relay, so every screenshot used to
  * freeze all three.
  *

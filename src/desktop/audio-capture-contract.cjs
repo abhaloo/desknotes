@@ -342,7 +342,7 @@ function isTerminalCaptureEvent(event) {
  */
 function validateNativeManifest(
   manifest,
-  { expectedArch = "x64", expectedElectronTarget = "33.4.11" } = {},
+  { expectedArch = "x64", expectedElectronTarget = "44.9.0" } = {},
 ) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     throw makeCodedError("invalid-manifest", "native manifest must be an object");

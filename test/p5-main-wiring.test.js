@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * Behavioral test of the desktop shell's session wiring: the REAL main.mjs
- * boots under Electron's bundled Node (20.x, no global WebSocket) with a fake
+ * boots under Electron's bundled Node (24.x with --no-experimental-websocket: no global WebSocket) with a fake
  * `electron` module (test/fixtures/fake-electron.mjs), and the driver invokes
  * IPC handlers exactly like the preload bridge. p5-shell-wiring.test.js only
  * pattern-matches source; this one runs it.
@@ -34,7 +34,8 @@ function runDriver(mode) {
     "DEEPSEEK_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "TYPESAFE_API_KEY", "LLM_API_KEY", "VISION_API_KEY", "ANSWER_MODEL"]) {
     delete env[key];
   }
-  const result = spawnSync(electron, [driver], { cwd: root, env, encoding: "utf8", timeout: 45_000, windowsHide: true });
+  // The flag hides Node 24's global WebSocket, so the driver runs the no-global path the ws fallback exists for.
+  const result = spawnSync(electron, ["--no-experimental-websocket", driver], { cwd: root, env, encoding: "utf8", timeout: 45_000, windowsHide: true });
   const line = String(result.stdout ?? "")
     .split(/\r?\n/)
     .find((l) => l.startsWith("RESULT "));
@@ -69,7 +70,7 @@ test("main.mjs (embedded server, default config): sessions start, failures surfa
   assert.equal(steps.hijack.envelope.error.code, "E_INVALID_PAYLOAD");
   assert.equal(steps.hijack.attackerConnections, 0);
 
-  // #1: the session actually starts under Node 20 and frames flow.
+  // #1: the session actually starts under Electron's Node 24 and frames flow.
   assertSingleEnvelope(steps.start1, "start1");
   assert.equal(steps.start1.ok, true, JSON.stringify(steps.start1));
   assert.ok(steps.session1.frameTypes.includes("session.state"));

@@ -6,10 +6,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * The desktop shell runs the transport under Electron's Node (20.x), which has
- * NO global WebSocket. Bun does, so in-process tests can never catch a client
- * that assumes one. These tests run a real session in a child process under
- * the runtimes that matter.
+ * The transport must work without a global WebSocket: the desktop shell
+ * passes `ws` explicitly, and a runtime without one must still connect. Bun
+ * and Electron's Node 24 both have one, so in-process tests can never catch a
+ * client that assumes it. These tests run a real session in a child process
+ * under Electron's Node with --no-experimental-websocket.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -56,9 +57,10 @@ function assertSessions(report) {
 const electron = electronBinary();
 
 test("realtime client works under Electron's Node runtime (no global WebSocket)", { skip: !electron && "electron binary not installed", timeout: 30_000 }, () => {
-  const report = runFixture(electron, [], { ELECTRON_RUN_AS_NODE: "1" });
+  // Electron 44 bundles Node 24, which has a global WebSocket; the flag hides it so this child runs the no-global path the ws fallback exists for.
+  const report = runFixture(electron, ["--no-experimental-websocket"], { ELECTRON_RUN_AS_NODE: "1" });
   assert.match(report.runtime, /^electron-/);
-  assert.match(report.node, /^20\./, "Electron 33 bundles Node 20 (no global WebSocket)");
+  assert.match(report.node, /^2[24]\./, "Electron 44 bundles Node 24 (Node 20 on Electron 33)");
   assertSessions(report);
 });
 

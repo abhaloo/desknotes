@@ -1675,9 +1675,9 @@ function onBeforeQuit(event) {
 /* -------------------------------------------------------------------- session */
 
 /**
- * Electron 33's main process runs Node 20, which has no global WebSocket, so
- * the client gets an explicit `ws` factory (the transport also falls back to
- * `ws` on its own; being explicit keeps the shell independent of that).
+ * Electron 44 bundles Node 24, which has a global WebSocket; the explicit `ws`
+ * factory keeps the shell independent of that (the transport also falls back
+ * to `ws` on its own).
  */
 async function socketFactory() {
   const ws = await optionalImport("ws", "ws");

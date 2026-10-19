@@ -835,6 +835,8 @@ async function runPractice(desktop) {
     const snapshot = await fromPractice("practice:get");
     return snapshot.value?.session?.active ? snapshot.value.session : null;
   }, 10_000);
+  // The server-side onSessionStart runs ~25-30 ms after the shell reports the session active.
+  await waitFor(() => practiceSeen.starts.length >= 1, 5000);
   const status = await fake.invoke("speech:getRealtimeStatus");
   step("started", {
     ok: started.ok,

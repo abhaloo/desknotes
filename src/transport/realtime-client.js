@@ -2,7 +2,8 @@
  * RealtimeClient — client side of the v1 realtime wire protocol (docs/protocol.md).
  *
  * Dual-runtime (Bun + Electron's Node): the global `WebSocket` is used when the
- * runtime has one and `ws` otherwise (Electron 33 main = Node 20, no global).
+ * runtime has one and `ws` otherwise (Electron 44 main = Node 24, which has one;
+ * Electron 33's Node 20 had none).
  * Socket construction is injectable, which keeps the reconnect/ring logic
  * unit-testable without a network.
  *
@@ -51,9 +52,10 @@ import { unrefTimer } from "../shared/timers.js";
 import { createRequire } from "node:module";
 
 /**
- * Default socket factory. Bun and Node >= 22 ship a global WebSocket, but
- * Electron 33's main process runs Node 20, which does not — there the
- * browser-compatible client from `ws` (an allowed dependency) is used. `ws`
+ * Default socket factory. Bun and Node >= 22 ship a global WebSocket, and so
+ * does Electron 44's main process (Node 24). Runtimes without one, such as
+ * Electron 33's Node 20, use the browser-compatible client from `ws` (an
+ * allowed dependency). `ws`
  * delivers text frames as strings and, with binaryType "arraybuffer", binary
  * frames as ArrayBuffers: the same event contract as the global client.
  */

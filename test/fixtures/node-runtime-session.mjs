@@ -1,6 +1,6 @@
 /**
  * Runs the realtime client against the real server under a NON-Bun runtime
- * (Electron's Node 20 via ELECTRON_RUN_AS_NODE, or Node with the global
+ * (Electron 44's bundled Node 24 via ELECTRON_RUN_AS_NODE, or Node with the global
  * WebSocket disabled). Bun ships a global WebSocket, which is exactly why the
  * "WebSocket is not defined" launch failure never showed up under `bun test`.
  *

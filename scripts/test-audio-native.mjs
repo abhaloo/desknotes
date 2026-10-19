@@ -3,7 +3,7 @@
  * utility process.
  *
  * WHY Electron and not host Node: audio_capture.node is built for Electron
- * 33.4.11. Host Node can run this script, but it must not load the addon.
+ * 44.9.0. Host Node can run this script, but it must not load the addon.
  */
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";

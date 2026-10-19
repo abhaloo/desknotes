@@ -27,7 +27,7 @@ function Fail([string]$message) {
   exit 1
 }
 
-if (-not (Test-Path $electron)) { Fail "Electron is missing at $electron. Run npm install in $repo." }
+if (-not (Test-Path $electron)) { Fail "Electron is missing at $electron. In $repo run: npm install, then node node_modules/electron/install.js" }
 
 # Only main processes: helpers carry --type=.
 $mains = Get-CimInstance Win32_Process -Filter "Name='electron.exe' OR Name='DeskNotes.exe'" |

@@ -16,6 +16,10 @@ npm test                      # every test file, each in its own Bun process
 bun scripts/run-tests.mjs test/terms-engine.test.js   # some files only
 ```
 
+`npm install` does not download the Electron binary (Electron 42 and later).
+Run `node node_modules/electron/install.js` once after it. `npm run dev`
+stops with this command when the binary is missing.
+
 To check answer quality against a real provider (uses your keys), run the
 sales question set against the sample product sheet:
 
@@ -83,17 +87,9 @@ The packaged app is self-contained: the realtime server starts inside the
 app process. Set `EMBEDDED_SERVER=0` to turn it off, or `REALTIME_URL` to use
 another server. The Silero model ships in `resources\app.asar.unpacked`.
 
-electron-builder extracts its code-signing bundle with symbolic links, which
-fails on Windows accounts that cannot create them. Turn on Developer Mode, or
-build `scripts/7za-shim.js` into the extractor slot once after `npm install`:
-
-```powershell
-mv node_modules/7zip-bin/win/x64/7za.exe node_modules/7zip-bin/win/x64/7za-real.exe
-bun build scripts/7za-shim.js --compile --outfile node_modules/7zip-bin/win/x64/7za.exe
-```
-
-The shim only turns the macOS symbolic-link warnings into success. Every
-real extraction error still fails the build.
+On Windows accounts without symbolic-link privilege, electron-builder logs
+symbolic-link errors while it extracts its code-signing bundle.
+electron-builder 26 treats the symbolic-link errors as warnings, so no extra step is needed.
 
 ## Data folder
 

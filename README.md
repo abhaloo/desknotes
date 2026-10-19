@@ -83,6 +83,13 @@ analysis.
    npm install
    ```
 
+   Electron 42 and later do not download their binary during `npm install`.
+   Download it once:
+
+   ```powershell
+   node node_modules/electron/install.js
+   ```
+
 2. Build the audio capture addon:
 
    ```powershell

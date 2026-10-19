@@ -1,6 +1,6 @@
 /**
  * Electron-level speech -> guidance latency: the client path runs in a REAL
- * Electron main process (Node 20, `ws` fallback socket), with real Silero VAD
+ * Electron main process (Node 24, `ws` socket), with real Silero VAD
  * on synthesized speech (bench/fixtures/*.wav, Windows TTS), against the mock
  * server in a separate bun process. Optionally a screenshot is taken in the
  * same main process 300 ms before the question ends: the old thumbnail path

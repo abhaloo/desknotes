@@ -41,7 +41,7 @@ function validManifest(dir, bytes) {
     apiVersion: 1,
     napiVersion: 8,
     arch: "x64",
-    electronTarget: "33.4.11",
+    electronTarget: "44.9.0",
   };
 }
 
@@ -66,7 +66,7 @@ test("a matching addon, manifest, and source digest is accepted", () => {
     assert.equal(result.arch, "x64");
     assert.equal(result.apiVersion, 1);
     assert.equal(result.napiVersion, 8);
-    assert.equal(result.electronTarget, "33.4.11");
+    assert.equal(result.electronTarget, "44.9.0");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -129,7 +129,7 @@ test("packaging rejects the wrong architecture and Electron target", () => {
     writeManifest(dir, { ...manifest, arch: "arm64" });
     assert.throws(() => validateNativeAudioPackage({ root: dir }), /arch must be "x64"/);
     writeManifest(dir, { ...manifest, electronTarget: "32.0.0" });
-    assert.throws(() => validateNativeAudioPackage({ root: dir }), /electronTarget must be "33.4.11"/);
+    assert.throws(() => validateNativeAudioPackage({ root: dir }), /electronTarget must be "44.9.0"/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

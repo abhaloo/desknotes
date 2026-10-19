@@ -53,7 +53,8 @@ const UNSET = [
 function runDriver(mode) {
   const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1", DRIVER_MODE: mode };
   for (const key of UNSET) delete env[key];
-  const result = spawnSync(electron, [driver], { cwd: root, env, encoding: "utf8", timeout: 90_000, windowsHide: true });
+  // The flag hides Node 24's global WebSocket, so the driver runs the no-global path the ws fallback exists for.
+  const result = spawnSync(electron, ["--no-experimental-websocket", driver], { cwd: root, env, encoding: "utf8", timeout: 90_000, windowsHide: true });
   const line = String(result.stdout ?? "")
     .split(/\r?\n/)
     .find((entry) => entry.startsWith("RESULT "));

@@ -1,12 +1,12 @@
 /**
- * Build the owned WASAPI addon for Electron 33.4.11 x64.
+ * Build the owned WASAPI addon for Electron 44.9.0 x64.
  *
  * WHY a preflight before node-gyp: a missing compiler or Windows SDK must
  * exit with a structured diagnostic. A later step must not invent a .node
  * file to hide that gap.
  *
  * WHY Electron headers: the addon loads in the Electron utility process,
- * whose ABI is 33.4.11, not the host Node that runs this script.
+ * whose ABI is 44.9.0, not the host Node that runs this script.
  */
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -25,7 +25,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const nativeDir = join(root, "native");
 const addonPath = join(nativeDir, "build", "Release", "audio_capture.node");
 const manifestPath = join(root, "src", "desktop", "native-audio-manifest.json");
-const electronTarget = "33.4.11";
+const electronTarget = "44.9.0";
 
 const dynamicCrt = new Set([
   "vcruntime140.dll",
@@ -301,7 +301,7 @@ const rebuild = spawnSync(gyp.command, [
   ...gyp.prefix,
   "rebuild",
   "--directory", nativeDir,
-  "--target=33.4.11",
+  "--target=44.9.0",
   "--arch=x64",
   "--dist-url=https://electronjs.org/headers",
 ], { cwd: root, encoding: "utf8", windowsHide: true });
