@@ -30,5 +30,7 @@ test("renderer: a done, cut answer shows a quiet note under the text", () => {
   assert.match(app, /if \(cut\) els\.answerText\.dataset\.cut = "";\s*else delete els\.answerText\.dataset\.cut;/);
   const rule = /\.answer-text\[data-cut\]::after \{[^}]*\}/.exec(css)?.[0] ?? "";
   assert.match(rule, /content: "Answer cut short\."/);
-  assert.match(rule, /color: var\(--muted\)/);
+  // The look is shared with the fallback note (answer-fallback.js).
+  const look = /\.answer-text\[data-cut\]::after,\s*\.answer-text\[data-fallback\]::after \{[^}]*\}/.exec(css)?.[0] ?? "";
+  assert.match(look, /color: var\(--muted\)/);
 });

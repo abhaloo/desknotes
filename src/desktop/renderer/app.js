@@ -23,6 +23,9 @@ import { TermsPainter, TermsState } from "./terms-view.js";
 import { shouldFollow } from "./answer-scroll.js";
 import { buildDeviceSelectors, createStatusGate, presentAudioStatus } from "./audio-status.js";
 import { groundingErrorText, groundingStatusText } from "./grounding-view.js";
+import { ANSWER_RETRY_TEXT, answerErrorText } from "./answer-error.js";
+import { fallbackNoteText } from "./answer-fallback.js";
+import { keysStatusText } from "./keys-status.js";
 import { applyCaptureToggle } from "./capture-start.js";
 import { installSplitters } from "./layout-splitters.js";
 
@@ -95,6 +98,8 @@ const els = {
   answerInstructionsPath: el("answer-instructions-path"),
   btnOpenDataFolder: el("btn-open-data-folder"),
   btnOpenKnownTerms: el("btn-open-known-terms"),
+  keysStatus: el("keys-status"),
+  btnOpenKeys: el("btn-open-keys"),
 };
 
 const answers = new AnswerBuffer();const transcripts = new TranscriptLanes();
@@ -230,6 +235,10 @@ function renderAnswer() {
       const cut = Boolean(active?.done && active.cut);
       if (cut) els.answerText.dataset.cut = "";
       else delete els.answerText.dataset.cut;
+      // Another model answered (turn.done `fallback`): the same quiet note, naming it.
+      const fallback = active?.done ? fallbackNoteText(active.fallback) : "";
+      if (fallback) els.answerText.dataset.fallback = fallback;
+      else delete els.answerText.dataset.fallback;
       const id = active?.id ?? null;
       if (id !== answerId) {
         answerId = id;
@@ -488,8 +497,10 @@ function onTranscript(frame = {}) {
 
 function onAnswer(frame = {}) {
   // Downlink answer vocabulary (docs/protocol.md): `gate.verdict`,
-  // `turn.started`, `turn.token`, `turn.done`, `turn.superseded` — all
-  // consumed from the raw-frame relay.
+  // `turn.started`, `turn.token`, `turn.done`, `turn.superseded`, `terms` — all
+  // consumed from the raw-frame relay. `error` and `error.retry` are here too:
+  // a failed generation still produces an (empty) `turn.done`, so without a
+  // message the card would just stay blank.
   const data = frame.data ?? frame;
   switch (frame.type) {
     case "turn.started":
@@ -515,6 +526,16 @@ function onAnswer(frame = {}) {
       // itself is not repainted.
       if (terms.apply(data, answers.active?.id ?? null)) renderTerms();
       return;
+    case "error.retry":
+      // The server is retrying a failed generation itself. Say so: the card
+      // sits empty until the second attempt answers.
+      showToast(ANSWER_RETRY_TEXT, "info", 2600);
+      return;
+    case "error": {
+      const text = answerErrorText(data);
+      if (text) showToast(text, "error", 7000);
+      return;
+    }
     default:
       return;
   }
@@ -764,6 +785,7 @@ function wireEvents() {
     els.groundingClear?.addEventListener("click", onGroundingClear);
     els.btnOpenDataFolder?.addEventListener("click", onOpenDataFolder);
     els.btnOpenKnownTerms?.addEventListener("click", onOpenKnownTerms);
+    els.btnOpenKeys?.addEventListener("click", onOpenKeys);
     els.toggleClickThrough?.addEventListener("change", async () => {
       const wanted = els.toggleClickThrough.checked;
       const result = await call(CH.WINDOW_SET_CLICK_THROUGH, { enabled: wanted });
@@ -916,11 +938,12 @@ function renderGrounding(errorText = null) {
   if (els.groundingClear) els.groundingClear.disabled = !grounding.document;
 }
 
-function renderSettings({ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, repContext, highlights, answerCards, glossary } = {}) {
+function renderSettings({ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, keySources, repContext, highlights, answerCards, glossary } = {}) {
   if (els.settingsNote) {
     els.settingsNote.textContent = readError ?? "";
     els.settingsNote.hidden = !readError;
   }
+  if (els.keysStatus && keySources) els.keysStatus.textContent = keysStatusText(keySources);
   if (els.answerModel && typeof answerModel === "string") els.answerModel.value = answerModel;
   if (els.repContext && typeof repContext === "boolean") els.repContext.checked = repContext;
   if (els.highlights && typeof highlights === "boolean") els.highlights.checked = highlights;
@@ -944,16 +967,21 @@ function renderSettings({ readError = null, answerModel, answerInstructionsPath,
 
 /**
  * The note for a choice whose key is missing, or null. Without a DeepSeek key
- * a DeepSeek choice answers on the configured engine (answer-models.js), which
- * is Qwen with thinking on Cerebras when CEREBRAS_API_KEY is set.
+ * a DeepSeek choice answers on the configured engine, which is Qwen with
+ * thinking on Cerebras when CEREBRAS_API_KEY is set; without a Cerebras key
+ * the Qwen choice answers on DeepSeek V4.1 Flash (engines/index.js). With
+ * neither key there are no answers: the app never shows demo answers.
  */
 function answerModelMissingKey(choice, { deepseekAvailable, cerebrasAvailable } = {}) {
   if (choice === "cerebras-qwen-thinking") {
-    return cerebrasAvailable === false ? "CEREBRAS_API_KEY was not found, so Qwen 27B can't answer. Answers use demo text." : null;
+    if (cerebrasAvailable !== false) return null;
+    return deepseekAvailable === false
+      ? "DEEPSEEK_API_KEY and CEREBRAS_API_KEY were not found, so there are no answers."
+      : "CEREBRAS_API_KEY was not found, so answers use DeepSeek V4.1 Flash.";
   }
   if (deepseekAvailable !== false) return null;
   return cerebrasAvailable === false
-    ? "DEEPSEEK_API_KEY and CEREBRAS_API_KEY were not found, so answers use demo text."
+    ? "DEEPSEEK_API_KEY and CEREBRAS_API_KEY were not found, so there are no answers."
     : "DEEPSEEK_API_KEY was not found, so answers use Qwen 27B thinking (Cerebras).";
 }
 
@@ -1074,6 +1102,17 @@ async function onOpenKnownTerms() {
     await bridge.openKnownTerms();
   } catch (error) {
     showToast(error?.message ?? "Couldn't open the known-terms file.", "error");
+  }
+}
+
+/** Main opens keys.env (provider keys, read at launch) for editing. */
+async function onOpenKeys() {
+  if (!bridge) return;
+  try {
+    await bridge.openKeysFile();
+    showToast("Save keys.env, then restart the app to use the keys.", "info", 4000);
+  } catch (error) {
+    showToast(error?.message ?? "Couldn't open the keys file.", "error");
   }
 }
 

@@ -60,7 +60,7 @@ test("aborting the signal stops the mock stream promptly", async () => {
   assert.equal(deltas.length, count, "no deltas after abort");
 });
 
-test("unconfigured openai-compatible answerer degrades to mock", async () => {
+test("unconfigured openai-compatible answerer answers nothing: no demo text", async () => {
   const logs = [];
   const answerer = createAnswerer({
     provider: "openai-compatible",
@@ -68,8 +68,10 @@ test("unconfigured openai-compatible answerer degrades to mock", async () => {
     deltaMinMs: 0,
     deltaMaxMs: 0,
   });
-  const text = await answerer.answerOnce({ question: "What is your biggest strength?", intent: "answer" });
-  assert.ok(text.length > 100);
+  await assert.rejects(
+    () => answerer.answerOnce({ question: "What is your biggest strength?", intent: "answer" }),
+    (error) => error.code === "no_answer_model" && error.retryable === false,
+  );
   assert.ok(logs.some((entry) => entry.type === "answerer.provider_unconfigured"));
 });
 

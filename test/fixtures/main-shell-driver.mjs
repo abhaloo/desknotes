@@ -698,6 +698,31 @@ async function runGrounding(desktop) {
     failMessage: knownFailed.error?.message ?? null,
   });
 
+  // keys.env: never created at boot or read by a driver; "Edit keys…" writes the template, then opens it.
+  const keysFile = join(groundingUserData, "keys.env");
+  const keysAtBoot = existsSync(keysFile);
+  const keysCallsBefore = fake.openPathCalls.length;
+  const keysOpened = await fake.invoke("settings:openKeys");
+  const keysTemplate = existsSync(keysFile) ? readFileSync(keysFile, "utf8") : null;
+  writeFileSync(keysFile, "DEEPSEEK_API_KEY=sk-driver-edit\n");
+  const keysReopened = await fake.invoke("settings:openKeys");
+  const keysKept = readFileSync(keysFile, "utf8");
+  fake.setOpenPathResult("Failed to open path");
+  const keysFailed = await fake.invoke("settings:openKeys");
+  fake.setOpenPathResult("");
+  step("keysFile", {
+    atBoot: keysAtBoot,
+    expected: keysFile,
+    ok: keysOpened.ok && keysReopened.ok,
+    path: keysOpened.value?.path ?? null,
+    calls: fake.openPathCalls.slice(keysCallsBefore),
+    template: keysTemplate,
+    kept: keysKept,
+    failCode: keysFailed.error?.code ?? null,
+    failMessage: keysFailed.error?.message ?? null,
+    sources: (await fake.invoke("settings:get")).value?.keySources ?? null,
+  });
+
   // Window opacity: live without persist, saved on persist, clamped, shared by settings:get and window:getState.
   const opacityLive = await fake.invoke("window:setOpacity", { opacity: 0.6 });
   const storedAfterLive = readStored();

@@ -55,7 +55,7 @@ test("no LLM_TECHNICAL_* means no routes at all", () => {
 });
 
 test("the technical slot stays inside the chosen provider; ANSWER_PROVIDER=mock never goes live", () => {
-  const config = buildEngineConfig({
+  const env = {
     ANSWER_PROVIDER: "mock",
     LLM_BASE_URL: "https://llm.example/v1",
     LLM_API_KEY: "llm-key",
@@ -63,6 +63,8 @@ test("the technical slot stays inside the chosen provider; ANSWER_PROVIDER=mock 
     LLM_TECHNICAL_BASE_URL: "https://tech.example/v1",
     LLM_TECHNICAL_API_KEY: "tech-key",
     LLM_TECHNICAL_MODEL: "tech-model",
-  });
-  assert.equal(config.answererOptions.routes.technical.provider, "mock");
+  };
+  assert.equal(buildEngineConfig(env, { mode: "demo" }).answererOptions.routes.technical.provider, "mock");
+  // Live mode has no mock answers at all: the slot is unconfigured, still never live.
+  assert.equal(buildEngineConfig(env).answererOptions.routes.technical.provider, "unconfigured");
 });

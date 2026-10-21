@@ -122,16 +122,29 @@ DeskNotes hears the other side of the call.
 
 ## API keys
 
-DeskNotes reads its keys from environment variables. Save each key as a
-Windows user variable:
+The easiest way is the keys file. Open **Settings**, go to **API keys** and
+click **Edit keys…**. DeskNotes opens `keys.env` in Notepad. Paste each key
+after its `=` sign, save the file, then restart DeskNotes:
+
+```
+GROQ_API_KEY=your-key
+DEEPSEEK_API_KEY=your-key
+```
+
+The **API keys** line in Settings then shows where each key came from. The
+file lives in the data folder (`%APPDATA%\DeskNotes`) and is plain text, so
+keep it out of shared and synced folders.
+
+Environment variables also work. Save each key as a Windows user variable:
 
 ```powershell
 setx GROQ_API_KEY "your-key"
 ```
 
 You don't need to restart your terminal: DeskNotes also reads user variables
-that you saved after the terminal opened. [.env.example](.env.example) lists
-every variable with a short note; never commit real values.
+that you saved after the terminal opened. A key in `keys.env` wins over the
+same environment variable. [.env.example](.env.example) lists every variable
+with a short note; never commit real values.
 
 | Variable | What it powers | Needed |
 |---|---|---|

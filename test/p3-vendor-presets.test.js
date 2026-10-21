@@ -54,7 +54,9 @@ test("explicit provider settings win over vendor keys", () => {
   assert.equal(config.answererOptions.reasoningEffort, undefined);
   assert.equal(config.asrOptions.apiKey, "explicit-asr");
   assert.equal(config.asrOptions.maxRequestsPerMinute, undefined);
-  assert.equal(buildEngineConfig({ CEREBRAS_API_KEY: CEREBRAS, ANSWER_PROVIDER: "mock" }).answerProvider, "mock");
+  assert.equal(buildEngineConfig({ CEREBRAS_API_KEY: CEREBRAS, ANSWER_PROVIDER: "mock" }, { mode: "demo" }).answerProvider, "mock");
+  // Live mode never answers with the mock, and the vendor key still does not take over.
+  assert.equal(buildEngineConfig({ CEREBRAS_API_KEY: CEREBRAS, ANSWER_PROVIDER: "mock" }).answerProvider, "unconfigured");
 });
 
 test("a TypeSafe key turns both judgments on unless JEV_JUDGMENTS says otherwise", () => {

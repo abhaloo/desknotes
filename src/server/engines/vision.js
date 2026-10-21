@@ -66,6 +66,9 @@ const MAX_REPLY_TOKENS = 700;
  */
 export const INTERPRET_PROMPT = shippedPrompt("vision/interpret", { max_chars: MAX_INTERPRETATION_CHARS });
 
+/** Why a live screen analysis fails when no vision model is configured. */
+const NO_VISION_MODEL_TEXT = "no vision model is set up: add DEEPSEEK_API_KEY, then restart the app";
+
 /** Deterministic stand-ins for the offline mock (no vision model configured). */
 const STUB_READINGS = Object.freeze({
   question: {
@@ -88,10 +91,13 @@ const STUB_READINGS = Object.freeze({
 });
 
 /**
- * @param {{log?: Function, provider?: string|{name?: string, analyse: Function}, model?: string, baseUrl?: string, apiKey?: string, maxEntries?: number, maxImageBytes?: number}} [options]
+ * @param {{log?: Function, provider?: string|{name?: string, analyse: Function}, model?: string, baseUrl?: string, apiKey?: string, maxEntries?: number, maxImageBytes?: number, allowMockFallback?: boolean}} [options]
  *   The interpretation prompt is fixed (INTERPRET_PROMPT). An
  *   `answerInstructionsPath` option is accepted and ignored: section 4 of that
  *   file now shapes the answer to a screen turn (answerer.js) instead.
+ *   allowMockFallback: false (live mode, config.js) never uses the stub
+ *   reading. With no vision model, or no pixels to send, the analysis fails
+ *   with a reason instead, so no answer is built on a screen nobody read.
  * @returns {{analyse: (request: object, ctx?: {emit?: Function, sessionId?: string}) => Promise<object>, stats: () => object}}
  */
 export function createVisionEngine({
@@ -102,9 +108,11 @@ export function createVisionEngine({
   apiKey,
   maxEntries = DEFAULT_MAX_ENTRIES,
   maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
+  allowMockFallback = true,
 } = {}) {
   const logger = typeof log === "function" ? log : () => {};
-  const resolved = resolveProvider({ provider, model, baseUrl, apiKey, logger });
+  const found = resolveProvider({ provider, model, baseUrl, apiKey, logger });
+  const resolved = found.stub && !allowMockFallback ? { name: "none", redact: found.redact } : found;
   const cache = new Map(); // insertion order doubles as LRU order
   const counters = { hits: 0, misses: 0, errors: 0 };
 
@@ -140,6 +148,13 @@ export function createVisionEngine({
         return result;
       }
       const { hash, bytes, contentType, purpose, origin } = input;
+
+      if (resolved.name === "none") {
+        logger({ type: "vision.unconfigured", sessionId, command_id: commandId });
+        const result = failed("unconfigured", NO_VISION_MODEL_TEXT);
+        emitResult(emit, commandId, result);
+        return result;
+      }
 
       const cached = cacheGet(hash);
       if (cached) {
@@ -182,6 +197,11 @@ export function createVisionEngine({
         // A configured model that failed: an invented description would put
         // a screen nobody read into the answer, so this is a typed failure.
         const result = failed("provider", "the vision model could not read the screen");
+        emitResult(emit, commandId, result);
+        return result;
+      }
+      if (!analysis && !allowMockFallback) {
+        const result = failed("provider", "the screen image did not reach the vision model");
         emitResult(emit, commandId, result);
         return result;
       }
@@ -407,12 +427,12 @@ function resolveProvider({ provider, model, baseUrl, apiKey, logger }) {
     }
     // Log the reason, never the URL: it may embed credentials.
     logger({ type: "vision.provider_insecure_url", provider: name, reason: endpoint.reason });
-    return { name: "mock", analyse: async (request) => mockAnalyse(request), redact: plain };
+    return { name: "mock", stub: true, analyse: async (request) => mockAnalyse(request), redact: plain };
   }
   if (name !== "mock") {
     logger({ type: "vision.provider_unconfigured", provider: name });
   }
-  return { name: "mock", analyse: async (request) => mockAnalyse(request), redact: plain };
+  return { name: "mock", stub: true, analyse: async (request) => mockAnalyse(request), redact: plain };
 }
 
 function redactKey(text, key) {

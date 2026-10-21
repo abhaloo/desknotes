@@ -25,7 +25,7 @@ async function drain(answerer, args = { question: "q" }) {
   return text;
 }
 
-test("answerer refuses a plaintext remote provider URL and degrades to mock (key never sent)", async () => {
+test("answerer refuses a plaintext remote provider URL and answers nothing (key never sent)", async () => {
   const calls = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (...args) => {
@@ -42,8 +42,7 @@ test("answerer refuses a plaintext remote provider URL and degrades to mock (key
       deltaMinMs: 0,
       deltaMaxMs: 0,
     });
-    const text = await drain(answerer);
-    assert.ok(text.length > 50, "mock answer still streams");
+    await assert.rejects(() => drain(answerer), (error) => error.code === "no_answer_model", "no demo text either");
     assert.equal(calls.length, 0, "no request may carry the key over plaintext");
     const entry = logs.find((e) => e.type === "answerer.provider_insecure_url");
     assert.ok(entry, "the refusal is logged");

@@ -130,6 +130,18 @@ test("opening the app starts listening; the document loads, applies live, surviv
   assert.equal(steps.knownTerms.failCode, "E_OPEN_FILE");
   assert.match(steps.knownTerms.failMessage, /Couldn't open the known-terms file: Failed to open path/);
 
+  // keys.env is only made by "Edit keys…"; an edited file is never rewritten, and a driver never reads it.
+  assert.equal(steps.keysFile.atBoot, false, "boot never creates a keys file");
+  assert.equal(steps.keysFile.ok, true);
+  assert.equal(steps.keysFile.path, steps.keysFile.expected);
+  assert.deepEqual(steps.keysFile.calls, [steps.keysFile.expected, steps.keysFile.expected, steps.keysFile.expected]);
+  assert.match(steps.keysFile.template, /^DEEPSEEK_API_KEY=$/m, "the template lists the keys, empty");
+  assert.equal(steps.keysFile.kept, "DEEPSEEK_API_KEY=sk-driver-edit\n");
+  assert.equal(steps.keysFile.failCode, "E_OPEN_FILE");
+  assert.match(steps.keysFile.failMessage, /Couldn't open the keys file: Failed to open path/);
+  assert.deepEqual(Object.keys(steps.keysFile.sources).sort(), ["CEREBRAS_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "TYPESAFE_API_KEY"]);
+  assert.equal(Object.values(steps.keysFile.sources).includes("keys.env"), false, "settings:get never reports a key a driver did not read");
+
   // The title-row opacity slider: live while dragging, saved on release, never below 30%.
   assert.deepEqual(steps.windowOpacity.live, { windowOpacity: 0.6 });
   assert.equal(steps.windowOpacity.storedAfterLive.windowOpacity, 1, "a drag step is not written to disk");

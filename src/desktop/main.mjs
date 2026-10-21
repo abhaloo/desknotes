@@ -41,7 +41,8 @@ import { createPracticeSession } from "./practice/session.js";
 import { buildDebrief, formatDebrief } from "./practice/debrief.js";
 import { autoStartDecision, createAppPreferences, SETTINGS_UNREADABLE, validateSettingsUpdate } from "./app-preferences.js";
 import { selectNativeAddonLocation, validateNativeManifest } from "./audio-capture-contract.js";
-import { fillMissingUserEnv } from "./user-env.js";
+import { adoptKeyValues, adoptUserEnvironment } from "./user-env.js";
+import { KEYS_FILENAME, ensureKeysFile, keySources, openInNotepad, readKeysFile } from "./keys-file.js";
 import { prepareDataDir } from "./data-dir.js";
 import { ANSWER_INSTRUCTIONS_FILENAME, ensureAnswerInstructionsFile } from "../server/engines/answer-instructions.js";
 import { normalizeAnswerModel } from "../server/engines/answer-models.js";
@@ -2027,6 +2028,11 @@ function knownTermsPath() {
   return join(userDataDirectory(), KNOWN_TERMS_FILENAME);
 }
 
+/** The provider keys file (keys-file.js), next to app-preferences.json. */
+function keysFilePath() {
+  return join(userDataDirectory(), KEYS_FILENAME);
+}
+
 function queryGrounding() {
   return { document: documentMetadata(state.grounding.document), readError: state.grounding.readError };
 }
@@ -2112,6 +2118,28 @@ async function commandOpenKnownTerms() {
   return okEnvelope({ opened: true, path: file });
 }
 
+/**
+ * "Edit keys…": opens keys.env, writing the template first when it is
+ * missing. Windows has no default app for .env files, so the real app opens
+ * it in Notepad (keys-file.js); a test double of electron uses shell.openPath.
+ * The keys apply from the next launch.
+ */
+async function commandOpenKeysFile() {
+  const file = keysFilePath();
+  const seeded = await ensureKeysFile(file);
+  if (seeded.error) return failEnvelope(ErrorCode.OPEN_FILE, `Couldn't create the keys file: ${seeded.error}`);
+  let problem;
+  try {
+    problem = await (process.platform === "win32" && runsInRealElectron() ? openInNotepad(file) : shell.openPath(file));
+  } catch (error) {
+    problem = errorText(error);
+  }
+  if (typeof problem === "string" && problem.length > 0) {
+    return failEnvelope(ErrorCode.OPEN_FILE, `Couldn't open the keys file: ${problem}`);
+  }
+  return okEnvelope({ opened: true, path: file });
+}
+
 function querySettings() {
   return {
     autoStart: state.settings.autoStart,
@@ -2122,6 +2150,8 @@ function querySettings() {
     deepseekAvailable: typeof process.env.DEEPSEEK_API_KEY === "string" && process.env.DEEPSEEK_API_KEY.length > 0,
     // The Qwen choice, and the fallback without a DeepSeek key, need this one.
     cerebrasAvailable: typeof process.env.CEREBRAS_API_KEY === "string" && process.env.CEREBRAS_API_KEY.length > 0,
+    // Where each provider key came from at launch (keys.env or the environment), never a value.
+    keySources: keySources(process.env, keysFromFile),
     windowOpacity: currentWindowOpacity(),
     repContext: currentRepContext(),
     highlights: currentHighlights(),
@@ -2338,6 +2368,7 @@ function registerIpcRoutes() {
     [IPC.SETTINGS_SET]: (payload) => commandSetSettings(payload),
     [IPC.SETTINGS_OPEN_FOLDER]: () => commandOpenSettingsFolder(),
     [IPC.SETTINGS_OPEN_KNOWN_TERMS]: () => commandOpenKnownTerms(),
+    [IPC.SETTINGS_OPEN_KEYS]: () => commandOpenKeysFile(),
     [IPC.PRACTICE_SET_MATERIAL]: (payload = {}) => commandSetPracticeMaterial(payload),
     [IPC.PRACTICE_START]: () => commandStartPractice(),
     [IPC.PRACTICE_END]: () => commandEndPractice(),
@@ -2840,6 +2871,38 @@ function pinDataDirectory() {
 
 if (REFUSED_SWITCHES.length === 0 && !globalThis.__COPILOT_SHELL_LIBRARY__) pinDataDirectory();
 
+/** A real Electron app: not an ELECTRON_RUN_AS_NODE driver, not a test double of electron. */
+function runsInRealElectron() {
+  return Boolean(process.versions?.electron) && !process.env.ELECTRON_RUN_AS_NODE;
+}
+
+/** The key names keys.env set at launch, for settings:get `keySources`. */
+let keysFromFile = [];
+
+/**
+ * The provider keys, before bootstrap builds the engines. First the Windows
+ * user environment: a key set after the launching shell started is only in
+ * the registry, and a shell opened before it was changed hands the app the
+ * OLD value. Then keys.env in the data folder, which wins over both. Logs
+ * names and fingerprints only.
+ */
+async function adoptProviderKeys() {
+  const windows = await adoptUserEnvironment(process.env);
+  if (windows.filled.length > 0) console.log(`[app] read from the user environment: ${windows.filled.join(", ")}`);
+  for (const { key, before, after } of windows.replaced) {
+    console.log(`[app] ${key}: the launch environment had ${before}, Windows has ${after}; using Windows`);
+  }
+  const file = await readKeysFile(keysFilePath());
+  if (file.error) console.warn(`[app] keys.env not read: ${file.error}`);
+  for (const { line, reason } of file.ignored) console.warn(`[app] keys.env line ${line} ignored: ${reason}`);
+  const fromFile = adoptKeyValues(process.env, file.values);
+  keysFromFile = Object.keys(file.values);
+  if (fromFile.filled.length > 0) console.log(`[app] read from keys.env: ${fromFile.filled.join(", ")}`);
+  for (const { key, before, after } of fromFile.replaced) {
+    console.log(`[app] ${key}: the environment had ${before}, keys.env has ${after}; using keys.env`);
+  }
+}
+
 if (REFUSED_SWITCHES.length > 0) {
   // app.exit() above already ended the process; never boot a refused launch.
 } else if (globalThis.__COPILOT_SHELL_LIBRARY__) {
@@ -2855,16 +2918,9 @@ if (REFUSED_SWITCHES.length > 0) {
 
   app
     .whenReady()
-    // A key set after the launching shell started is only in the registry.
-    // A real Electron app only (not ELECTRON_RUN_AS_NODE drivers, not a test
-    // double of electron): tests must never pull in the user's real keys.
-    .then(() => (process.versions?.electron && !process.env.ELECTRON_RUN_AS_NODE ? fillMissingUserEnv(process.env) : []))
-    .then(
-      (filled) => {
-        if (filled.length > 0) console.log(`[app] read from the user environment: ${filled.join(", ")}`);
-      },
-      () => {},
-    )
+    // Tests must never pull in the user's real keys (adoptProviderKeys).
+    .then(() => (runsInRealElectron() ? adoptProviderKeys() : null))
+    .catch((error) => warn(`provider keys not read: ${errorText(error)}`))
     .then(bootstrap)
     .catch((error) => {
       warn(`shell bootstrap failed: ${errorText(error)}`);

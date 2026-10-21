@@ -47,6 +47,24 @@ export async function providerFetch(url, init, { apiKey, fetchImpl = globalThis.
 }
 
 /**
+ * A provider HTTP failure that keeps the status, so callers can tell a
+ * transient 5xx (worth retrying) from a refusal (402 out of credit, 401 bad
+ * key, 403 paywalled model) that another attempt cannot fix. A provider that
+ * sends `x-should-retry: false` is obeyed over the status class: Cerebras
+ * answers a billing-gated key with 402 and that header.
+ * @param {string} label
+ * @param {Response} response
+ */
+export function httpStatusError(label, response) {
+  const status = Number(response?.status) || 0;
+  const hint = String(response?.headers?.get?.("x-should-retry") ?? "").toLowerCase();
+  const error = new Error(`${label} HTTP ${status}`);
+  error.status = status;
+  error.retryable = hint === "false" ? false : status === 429 || status >= 500;
+  return error;
+}
+
+/**
  * Read a JSON body with a byte cap. Throws on overflow or invalid JSON.
  * @param {Response} response
  * @param {number} [maxBytes]

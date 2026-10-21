@@ -98,6 +98,7 @@ export const IPC = Object.freeze({
   SETTINGS_SET: "settings:set",
   SETTINGS_OPEN_FOLDER: "settings:openFolder", // additive: opens the data folder in the file manager
   SETTINGS_OPEN_KNOWN_TERMS: "settings:openKnownTerms", // additive: opens known-terms.txt in the default editor
+  SETTINGS_OPEN_KEYS: "settings:openKeys", // additive: opens keys.env (provider keys) for editing
 
   // practice / rehearsal (additive)
   PRACTICE_GET: "practice:get",
@@ -148,6 +149,7 @@ export const COMMAND_CHANNELS = Object.freeze([
   IPC.SETTINGS_SET,
   IPC.SETTINGS_OPEN_FOLDER,
   IPC.SETTINGS_OPEN_KNOWN_TERMS,
+  IPC.SETTINGS_OPEN_KEYS,
   IPC.SHELL_ACTION,
   IPC.PANELS_SET,
   IPC.PRACTICE_SET_MATERIAL,

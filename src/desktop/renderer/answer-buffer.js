@@ -153,6 +153,8 @@ export class AnswerBuffer {
     entry.truncated = false;
     // The engine cut the answer short ("lines", "code", "line", "length"): the card says so.
     entry.cut = typeof frame.cut === "string" && frame.cut ? frame.cut : null;
+    // Another model answered instead of the chosen one ({to, from?, reason?}): the card says so.
+    entry.fallback = frame.fallback && typeof frame.fallback.to === "string" && frame.fallback.to ? frame.fallback : null;
     entry.updatedAt = at;
     if (frame.gate_seq !== undefined) entry.gateSeq = frame.gate_seq;
     return entry;
@@ -183,6 +185,7 @@ export class AnswerBuffer {
       done: false,
       truncated: false,
       cut: null,
+      fallback: null,
       startedAt: at,
       updatedAt: at,
     };

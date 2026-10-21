@@ -92,11 +92,13 @@ test("main.mjs (embedded server, default config): sessions start, failures surfa
     assert.deepEqual(probe.frames, [], "nothing of the session leaks, not even capabilities");
   }
 
-  // #9: screen analysis works against the embedded server.
+  // #9: screen analysis reaches the embedded server and comes back. Default
+  // config is live mode with no keys, so the reading is a typed failure that
+  // names the missing key, never a stub reading.
   assertSingleEnvelope(steps.screen, "screen");
   assert.equal(steps.screen.ok, true, JSON.stringify(steps.screen));
-  assert.equal(steps.screen.value.status, "ok", JSON.stringify(steps.screen.value));
-  assert.equal(steps.screen.value.failure, undefined);
+  assert.equal(steps.screen.value.status, "failed", JSON.stringify(steps.screen.value));
+  assert.match(steps.screen.value.error, /no vision model is set up: add DEEPSEEK_API_KEY/);
   // Every window hears "busy" the instant the capture starts and "idle" once the reading is back.
   assert.deepEqual(steps.screenState, [true, false]);
 

@@ -313,13 +313,25 @@ select {
   padding: 0 3px;
 }
 
-/* An answer the engine cut short (turn.done `cut`): a quiet note after the last line. */
-.answer-text[data-cut]::after {
-  content: "Answer cut short.";
+/* An answer the engine cut short (turn.done `cut`), or one another model
+   wrote (turn.done `fallback`, answer-fallback.js): a quiet note after the
+   last line. Both notes share the one ::after, on two lines. */
+.answer-text[data-cut]::after,
+.answer-text[data-fallback]::after {
   display: block;
   margin-top: 4px;
   font-size: 12px;
   color: var(--muted);
+  white-space: pre-line;
+}
+.answer-text[data-cut]::after {
+  content: "Answer cut short.";
+}
+.answer-text[data-fallback]::after {
+  content: attr(data-fallback);
+}
+.answer-text[data-cut][data-fallback]::after {
+  content: "Answer cut short." "\A" attr(data-fallback);
 }
 
 /* Terms (terms-view.js): the finished card's jargon under the answer. Sticky

@@ -173,6 +173,15 @@
               </select>
             </div>
             <p id="answer-model-note" class="meta">Applies from the next answer.</p>
+            <!-- keys.env in the data folder (src/desktop/keys-file.js): read at launch, wins over environment variables. -->
+            <div class="audio-field">
+              <span class="field-label">API keys</span>
+              <p id="keys-status" class="meta">…</p>
+              <div class="audio-actions">
+                <button id="btn-open-keys" type="button" class="btn">Edit keys…</button>
+              </div>
+            </div>
+            <p class="meta">Keys in keys.env win over environment variables. Save the file, then restart the app.</p>
             <!-- Rep context (conversation-context.js): the rep's own mic speech reaches later answers. -->
             <label class="toggle">
               <input id="rep-context" type="checkbox" />

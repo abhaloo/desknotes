@@ -943,6 +943,8 @@ export function createPipelineEngine({
   async function runGeneration(target) {
     let iterator = null;
     let text = "";
+    // Only the attempt that answers names its model: a retry starts clean.
+    target.fallback = null;
     try {
       const stream = answererImpl.streamAnswer({
         ...answerArgs({ question: target.generatedFor, prospect: target.prospect ?? null, screenTurn: !!target.screenTurn }),
@@ -952,6 +954,11 @@ export function createPipelineEngine({
         // turn.done carries it so the card can say so.
         onCut: (reason) => {
           if (typeof reason === "string" && reason) target.cut ??= reason;
+        },
+        // The answerer says when a model other than the chosen one answers;
+        // turn.done carries it, like `cut`, for a quiet note under the card.
+        onFallback: (note) => {
+          target.fallback = fallbackNote(note);
         },
       });
       iterator = stream?.[Symbol.asyncIterator]?.();
@@ -1026,9 +1033,12 @@ export function createPipelineEngine({
       if (target.cancelled || turn !== target || isAbort(err)) return;
       target.text = text;
       target.error = String(err?.message ?? err);
-      if (!target.retried && text.length === 0) {
+      if (!target.retried && text.length === 0 && err?.retryable !== false) {
         // One transparent retry: the client is told a retry is
         // happening so a slow answer reads as "working", not "broken".
+        // A refusal is not retried: the provider already said no (402 out of
+        // credit carries `x-should-retry: false`), so the second attempt would
+        // land on the same wall and only delay the error the user needs.
         target.retried = true;
         emitFrame({
           v: PROTOCOL_VERSION,
@@ -1065,6 +1075,7 @@ export function createPipelineEngine({
         const data = { turn_id: target.id, text: target.text ?? "" };
         if (target.gateSeq != null) data.gate_seq = target.gateSeq;
         if (target.cut) data.cut = target.cut;
+        if (target.fallback) data.fallback = target.fallback;
         emitFrame({ v: PROTOCOL_VERSION, type: "turn.done", data });
         logger({
           type: "turn.done",
@@ -1072,12 +1083,14 @@ export function createPipelineEngine({
           reason,
           chars: (target.text ?? "").length,
           ...(target.cut ? { cut: target.cut } : {}),
+          ...(target.fallback ? { fallback: target.fallback } : {}),
         });
         recordTelemetry({
           type: "turn.done",
           turnId: target.id,
           chars: (target.text ?? "").length,
           ...(target.cut ? { cut: target.cut } : {}),
+          ...(target.fallback ? { fallback: target.fallback } : {}),
           ...(target.screenTurn ? { screen: screenTimings(target) } : {}),
         });
         // Keyed on the finish reason, not on target.error: a failed empty
@@ -1355,6 +1368,7 @@ export function createPipelineEngine({
     if (!rescue || turn !== rescue || rescue.cancelled) return;
     rescue.finished = true;
     if (contender.cut) rescue.cut = contender.cut;
+    if (contender.fallback) rescue.fallback = contender.fallback;
     finishTurn(rescue, reason);
   }
 
@@ -2009,6 +2023,22 @@ export function buildContext({ resume, playbook, docs, history, screen, prospect
   const usedElsewhere = head.join("\n\n").length + tail.join("\n\n").length + separators + "DOCUMENTS:\n".length;
   const docsText = fitDocuments(text(docs), Math.max(0, CONTEXT_CHARS - usedElsewhere), question);
   return [...head, docsText && `DOCUMENTS:\n${docsText}`, ...tail].filter(Boolean).join("\n\n");
+}
+
+/**
+ * turn.done's `fallback`: which model answered instead of the chosen one, and
+ * why, as short names and a reason code. Only those three strings reach the
+ * wire; anything without a model name is no note.
+ * @param {unknown} note the answerer's onFallback argument
+ * @returns {{to: string, from?: string, reason?: string}|null}
+ */
+function fallbackNote(note) {
+  const text = (value) => (typeof value === "string" && value.length > 0 ? value : null);
+  const to = text(note?.to);
+  if (!to) return null;
+  const from = text(note.from);
+  const reason = text(note.reason);
+  return { to, ...(from ? { from } : {}), ...(reason ? { reason } : {}) };
 }
 
 function isAbort(err) {

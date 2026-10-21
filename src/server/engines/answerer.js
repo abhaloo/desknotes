@@ -4,13 +4,16 @@
  * The mock provider is the default so the prefetch pipeline is fully testable
  * without credentials. It answers in a fixed structure (acknowledge ->
  * approach -> example -> bridge) and spaces deltas 40-80 ms apart so callers
- * can observe real streaming behavior rather than one buffered blob.
+ * can observe real streaming behavior rather than one buffered blob. Only an
+ * explicit "mock" provider gets it: live mode never configures it
+ * (config.js), because demo text on a real call reads like advice.
  *
  * An openai-compatible chat-completions endpoint plugs in behind the same
- * `streamAnswer` interface. When it is unconfigured we simply use the mock:
- * a missing key must never take a live session down. The same degradation
- * applies to an endpoint that fails the transport policy (plaintext to a
- * remote host, credentials in the URL): the key is never sent there.
+ * `streamAnswer` interface. Any other configuration (no key, an unknown
+ * provider, "unconfigured", or an endpoint that fails the transport policy:
+ * plaintext to a remote host, credentials in the URL) answers nothing: each
+ * answer throws a `no_answer_model` error and no key is sent anywhere. The
+ * session stays up; the overlay names the missing model.
  *
  * Answer cards (src/shared/answer-cards.js, `streamAnswer({cards: true})`):
  * an answer is a short card starting with a VERDICT line, capped at
@@ -18,7 +21,7 @@
  * rule, checks that line 1 is a VERDICT line (one retry), and cuts runaway
  * streams.
  */
-import { checkProviderUrl, providerFetch, readJsonCapped } from "./provider-http.js";
+import { checkProviderUrl, httpStatusError, providerFetch, readJsonCapped } from "./provider-http.js";
 import { unrefTimer } from "../../shared/timers.js";
 import { createSpokenTextFilter } from "./spoken-text-filter.js";
 import { createLineCap } from "./card-line-cap.js";
@@ -174,8 +177,8 @@ export function createAnswerer({
   const warn = typeof log === "function" ? log : () => {};
   // Two resolved slots, one per prompt mode: a thinking model can serve the
   // technical slot while the spoken slot keeps its latency class. Each slot is
-  // resolved through the same transport policy; a slot that fails it degrades
-  // to mock exactly like the base configuration does today.
+  // resolved through the same transport policy; a slot that fails it answers
+  // nothing, exactly like the base configuration.
   const baseSlot = { provider, model, baseUrl, apiKey, temperature, reasoningEffort, thinking, systemPrompt };
   const slots = {
     spoken: resolveSlot({ ...baseSlot, ...(routes.spoken ?? {}) }),
@@ -295,7 +298,11 @@ export function createAnswerer({
       yield* cleanSpoken(open(0, lengthCut), signal, { highlights: highlights === true });
       return;
     }
-    yield* streamMock({ question, context, intent, signal, deltaMinMs, deltaMaxMs });
+    if (slot.resolved.name === "mock") {
+      yield* streamMock({ question, context, intent, signal, deltaMinMs, deltaMaxMs });
+      return;
+    }
+    throw noAnswerModelError(slot.resolved.reason);
   }
 
   async function answerOnce(args = {}) {
@@ -445,19 +452,34 @@ function resolveMode(mode, warn) {
 }
 
 function resolveProvider({ provider, baseUrl, apiKey, warn, model }) {
+  if (provider === "mock" || provider === "mock-scripted") return { name: "mock" };
   if (provider === "openai-compatible") {
     if (baseUrl && apiKey && typeof globalThis.fetch === "function") {
       const endpoint = checkProviderUrl(baseUrl);
       if (endpoint.ok) return { name: "openai-compatible", baseUrl: endpoint.url };
       // Log the reason, never the URL itself: it may embed credentials.
       warn({ type: "answerer.provider_insecure_url", provider, model, reason: endpoint.reason });
-      return { name: "mock" };
+      return { name: "none", reason: endpoint.reason };
     }
     warn({ type: "answerer.provider_unconfigured", provider, model });
-    return { name: "mock" };
+    return { name: "none", reason: "unconfigured" };
   }
-  if (provider !== "mock") warn({ type: "answerer.provider_unknown", provider });
-  return { name: "mock" };
+  if (provider === "unconfigured") return { name: "none", reason: "unconfigured" };
+  warn({ type: "answerer.provider_unknown", provider });
+  return { name: "none", reason: "unknown_provider" };
+}
+
+/**
+ * No model can answer. The turn fails instead of showing demo text:
+ * `retryable: false` skips the pipeline's retry (it would fail the same way),
+ * and `code` lets the overlay name the fix.
+ * @param {string} reason a code: unconfigured, unknown_provider, or a URL policy reason
+ */
+function noAnswerModelError(reason = "unconfigured") {
+  const error = new Error(`answerer: no answer model is set up (${reason})`);
+  error.code = "no_answer_model";
+  error.retryable = false;
+  return error;
 }
 
 /* ------------------------------------------------------------------ mock -- */
@@ -674,7 +696,9 @@ async function* streamFromChat({
       },
       { apiKey },
     );
-    if (!response.ok) throw new Error(`answerer: chat endpoint HTTP ${response.status}`);
+    // The status rides on the error: the pipeline retries a 5xx, never a
+    // refusal (402 out of credit, 401 key, 403 paywalled model).
+    if (!response.ok) throw httpStatusError("answerer: chat endpoint", response);
 
     const contentType = response.headers?.get?.("content-type") ?? "";
     if (!response.body || !contentType.includes("event-stream")) {

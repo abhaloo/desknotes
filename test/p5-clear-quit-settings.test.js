@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { AnswerBuffer, ScreenCards, TranscriptLanes, LANE } from "../src/desktop/renderer/answer-buffer.js";
 import { BROADCAST_CHANNELS, IPC } from "../src/desktop/ipc-gateway.js";
 import { ANSWER_MODEL_CHOICES } from "../src/server/engines/answer-models.js";
-import { USER_SCOPE_KEYS, fillMissingUserEnv, parseRegQuery, readUserEnvironmentVariable, resolveRegPath } from "../src/desktop/user-env.js";
+import { USER_SCOPE_KEYS, adoptUserEnvironment, keyFingerprint, parseRegQuery, readUserEnvironmentVariable, resolveRegPath } from "../src/desktop/user-env.js";
 
 const desktop = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "desktop");
 const read = (relative) => readFileSync(join(desktop, relative), "utf8");
@@ -113,7 +113,7 @@ test("the Answer model note names the missing key for every choice", () => {
   assert.match(body, /CEREBRAS_API_KEY was not found/);
   assert.match(body, /DEEPSEEK_API_KEY was not found, so answers use Qwen 27B thinking \(Cerebras\)/);
   assert.match(body, /DEEPSEEK_API_KEY and CEREBRAS_API_KEY were not found/);
-  assert.match(app, /renderSettings\(\{ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, repContext, highlights, answerCards, glossary \}/);
+  assert.match(app, /renderSettings\(\{ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, keySources, repContext, highlights, answerCards, glossary \}/);
   const main = read("main.mjs");
   assert.match(main, /cerebrasAvailable: typeof process\.env\.CEREBRAS_API_KEY === "string"/);
   assert.match(main, /answerModel: normalizeAnswerModel\(/, "settings:get always reports a listed choice");
@@ -149,24 +149,47 @@ test("the registry is read with the pinned reg.exe and a secret-free environment
   assert.equal(await readUserEnvironmentVariable("DEEPSEEK_API_KEY", { platform: "win32", exists, execFileImpl: failing }), null);
 });
 
-test("fillMissingUserEnv fills only missing keys and reports names, never values", async () => {
+test("adoptUserEnvironment fills missing keys, replaces a stale inherited one, and reports names, never values", async () => {
   const env = {};
-  assert.deepEqual(await fillMissingUserEnv(env, { read: async (name) => `sk-${name}` }), ["DEEPSEEK_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "TYPESAFE_API_KEY"]);
+  assert.deepEqual(await adoptUserEnvironment(env, { read: async (name) => `sk-${name}` }), {
+    filled: ["DEEPSEEK_API_KEY", "CEREBRAS_API_KEY", "GROQ_API_KEY", "TYPESAFE_API_KEY"],
+    replaced: [],
+  });
   assert.equal(env.DEEPSEEK_API_KEY, "sk-DEEPSEEK_API_KEY");
   assert.equal(env.CEREBRAS_API_KEY, "sk-CEREBRAS_API_KEY");
-  // A key the process already has is never read, let alone replaced.
-  const preset = { DEEPSEEK_API_KEY: "from-process" };
-  const read = [];
-  assert.deepEqual(await fillMissingUserEnv(preset, { read: async (name) => (read.push(name), "sk-y") }), ["CEREBRAS_API_KEY", "GROQ_API_KEY", "TYPESAFE_API_KEY"]);
-  assert.equal(preset.DEEPSEEK_API_KEY, "from-process");
-  assert.deepEqual(read, ["CEREBRAS_API_KEY", "GROQ_API_KEY", "TYPESAFE_API_KEY"]);
-  assert.deepEqual(await fillMissingUserEnv({}, { read: async () => null }), []);
+  // An inherited key is read every launch: a shell opened before the key was
+  // changed in Windows hands down the OLD value for as long as it lives, and
+  // the registry is the newer truth (the 402-with-credit-key bug).
+  const stale = { CEREBRAS_API_KEY: "csk-stale0000000000000abcd" };
+  const adopted = await adoptUserEnvironment(stale, {
+    keys: ["CEREBRAS_API_KEY"],
+    read: async () => "csk-fresh1111111111111wxyz",
+  });
+  assert.equal(stale.CEREBRAS_API_KEY, "csk-fresh1111111111111wxyz");
+  assert.deepEqual(adopted.filled, []);
+  assert.deepEqual(adopted.replaced, [{ key: "CEREBRAS_API_KEY", before: "csk-sta…abcd", after: "csk-fre…wxyz" }]);
+  // Fingerprints never carry a usable key.
+  assert.equal(keyFingerprint("csk-fresh1111111111111wxyz").includes("111111111"), false);
+  assert.equal(keyFingerprint("short"), "");
+  // An equal value is already right: nothing changes, nothing is logged.
+  const same = await adoptUserEnvironment({ CEREBRAS_API_KEY: "csk-fresh1111111111111wxyz" }, {
+    keys: ["CEREBRAS_API_KEY"],
+    read: async () => "csk-fresh1111111111111wxyz",
+  });
+  assert.deepEqual(same, { filled: [], replaced: [] });
+  // A key Windows does not have leaves the inherited value alone.
+  const kept = { GROQ_API_KEY: "gsk-inherited" };
+  assert.deepEqual(await adoptUserEnvironment(kept, { keys: ["GROQ_API_KEY"], read: async () => null }), { filled: [], replaced: [] });
+  assert.equal(kept.GROQ_API_KEY, "gsk-inherited");
 });
 
-test("main fills the user-scope key only in a real Electron app, before the embedded server starts", () => {
+test("main adopts the user-scope keys only in a real Electron app, before the embedded server starts", () => {
   const main = read("main.mjs");
-  assert.match(main, /process\.versions\?\.electron && !process\.env\.ELECTRON_RUN_AS_NODE \? fillMissingUserEnv\(process\.env\)/);
-  assert.ok(main.indexOf("fillMissingUserEnv(process.env)") < main.indexOf(".then(bootstrap)"), "the key is in place before bootstrap builds the engines");
+  assert.match(main, /function runsInRealElectron\(\) \{\s*return Boolean\(process\.versions\?\.electron\) && !process\.env\.ELECTRON_RUN_AS_NODE;/);
+  assert.match(main, /\.then\(\(\) => \(runsInRealElectron\(\) \? adoptProviderKeys\(\) : null\)\)/);
+  assert.match(main, /async function adoptProviderKeys\(\) \{\s*const windows = await adoptUserEnvironment\(process\.env\);/);
+  assert.ok(main.indexOf("adoptUserEnvironment(process.env)") < main.indexOf(".then(bootstrap)"), "the key is in place before bootstrap builds the engines");
+  assert.match(main, /the launch environment had \$\{before\}/, "a replaced key is logged, so a stale shell is visible");
 });
 
 test("Clear has a global Ctrl+Shift+X shortcut, listed as a clickable hint", () => {

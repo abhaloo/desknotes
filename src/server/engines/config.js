@@ -1,8 +1,9 @@
 /**
  * Provider configuration for the realtime server.
  *
- * Live mode uses a real ASR endpoint or an explicit unconfigured engine.
- * Demo mode may use the mock segmenter. Keys stay on the origin they belong
+ * Live mode uses a real ASR endpoint, answer model and vision model, or an
+ * explicit unconfigured engine that fails with a reason. Demo mode may use
+ * the mock segmenter, answerer and screen reading. Keys stay on the origin they belong
  * to: an ASR key is explicit, and a shared LLM key is reused only for that
  * LLM origin. OPENAI_API_KEY is reused only for the default OpenAI origin.
  */
@@ -141,6 +142,29 @@ function resolveMode(mode, env) {
   return resolved;
 }
 
+/**
+ * The answer provider the engine gets. Live mode never answers with the mock:
+ * demo text on a real call reads like advice. So in live mode a missing or
+ * incomplete configuration, and an explicit mock, are "unconfigured", and
+ * every answer fails with a reason the overlay names. Demo mode keeps the mock
+ * for tests and the demo script.
+ * @param {string|undefined} requested ANSWER_PROVIDER
+ * @param {{baseUrl?: string, apiKey?: string, mode: "live"|"demo"}} config
+ */
+function resolveAnswerProvider(requested, { baseUrl, apiKey, mode }) {
+  const missing = mode === "demo" ? "mock" : "unconfigured";
+  if (requested == null) return missing;
+  if (requested === "openai-compatible" && (!baseUrl || !apiKey)) {
+    console.warn(`[server] ANSWER_PROVIDER=${requested} requires LLM_BASE_URL and LLM_API_KEY; using ${missing}`);
+    return missing;
+  }
+  if (mode !== "demo" && (requested === "mock" || requested === "mock-scripted")) {
+    console.warn(`[server] ANSWER_PROVIDER=${requested} is for COPILOT_MODE=demo only; live answers are unconfigured`);
+    return "unconfigured";
+  }
+  return requested;
+}
+
 function present(value) {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -185,17 +209,10 @@ function liveAsrReadiness(provider, baseUrl, apiKey) {
 export function buildEngineConfig(rawEnv = process.env, { mode, answerInstructionsPath, telemetryDir, knownTermsPath } = {}) {
   const env = applyVendorPresets(rawEnv);
   const resolvedMode = resolveMode(mode, env);
-  const requestedProvider = env.ANSWER_PROVIDER ?? "mock";
   const baseUrl = env.LLM_BASE_URL;
   const apiKey = env.LLM_API_KEY;
   const model = env.LLM_MODEL;
-  const answerProvider =
-    requestedProvider === "openai-compatible" && (!baseUrl || !apiKey) ? "mock" : requestedProvider;
-  if (answerProvider !== requestedProvider) {
-    console.warn(
-      `[server] ANSWER_PROVIDER=${requestedProvider} requires LLM_BASE_URL and LLM_API_KEY; using mock`,
-    );
-  }
+  const answerProvider = resolveAnswerProvider(env.ANSWER_PROVIDER, { baseUrl, apiKey, mode: resolvedMode });
 
   const answerRoles = env.ANSWER_ROLES
     ? env.ANSWER_ROLES.split(",").map((role) => role.trim()).filter(Boolean)
@@ -330,6 +347,9 @@ export function buildEngineConfig(rawEnv = process.env, { mode, answerInstructio
       apiKey: scopedApiKey({ explicitKey: env.VISION_API_KEY, baseUrl: visionBaseUrl, fallback: operatorLlm }),
       model: env.VISION_MODEL ?? present(rawEnv.LLM_MODEL),
       answerInstructionsPath: instructionsPath,
+      // Like ASR: the stub screen reading is for demo mode only. Live screen
+      // analysis with no vision model fails instead of inventing a reading.
+      allowMockFallback: resolvedMode === "demo",
     },
     telemetryOptions: recorderOptionsFromEnv(env, { dir: telemetryDir }),
   };

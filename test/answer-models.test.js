@@ -246,3 +246,105 @@ test("Qwen 27B thinking: the configured Cerebras engine with reasoning_effort hi
   const other = { ...CEREBRAS_OPTIONS, baseUrl: "https://llm.example.com/v1" };
   assert.deepEqual(applyAnswerModelSelection(other, { answerModel: "cerebras-qwen-thinking", cerebrasAvailable: true }), { options: other, unavailable: true, choice: "cerebras-qwen-thinking" });
 });
+
+/**
+ * A chosen engine that refuses the request (Cerebras 402 out of credit) must
+ * not turn every card empty: the same question is replayed once on DeepSeek
+ * V4.1 Flash with thinking on, which is the default Settings choice.
+ */
+function refusingChat({ refuseOrigin = "https://api.cerebras.ai", status = 402 } = {}) {
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const call = { url: String(url), body: JSON.parse(init.body), auth: init.headers.authorization };
+    calls.push(call);
+    if (call.url.startsWith(refuseOrigin)) {
+      return new Response(JSON.stringify({ message: "Payment required to access this resource.", code: "payment_required" }), {
+        status,
+        headers: { "content-type": "application/json", "x-should-retry": "false" },
+      });
+    }
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\ndata: [DONE]\n\n`, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+  return { calls, restore: () => (globalThis.fetch = realFetch) };
+}
+
+test("a Cerebras refusal replays the answer on DeepSeek thinking, and logs the switch", async () => {
+  const chat = refusingChat();
+  const logs = [];
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "cerebras-qwen-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+      log: (entry) => logs.push(entry),
+    });
+    const text = await answerer.answerOnce({ question: "what is a worker thread" });
+    // The spoken filter bullets the line: the answer arrives, from DeepSeek.
+    assert.match(text.trim(), /ok/, "the answer still arrives");
+    assert.deepEqual(
+      chat.calls.map(({ url, body, auth }) => [url, body.model, body.thinking?.type ?? null, body.reasoning_effort ?? null, auth]),
+      [
+        ["https://api.cerebras.ai/v1/chat/completions", "qwen-3.8-27b", null, "high", `Bearer ${CEREBRAS_KEY}`],
+        ["https://api.deepseek.com/chat/completions", "deepseek-flash", "enabled", null, `Bearer ${DEEPSEEK_KEY}`],
+      ],
+    );
+    const switchLine = logs.find((entry) => entry.type === "engine.answer_failover");
+    assert.deepEqual(
+      { status: switchLine.status, from: switchLine.from, to: switchLine.to, choice: switchLine.choice, thinking: switchLine.thinking },
+      { status: 402, from: "qwen-3.8-27b", to: "deepseek-flash", choice: "deepseek-flash-thinking", thinking: "enabled" },
+    );
+    assert.equal(JSON.stringify(logs).includes(DEEPSEEK_KEY), false, "never a key in the log");
+  } finally {
+    chat.restore();
+  }
+});
+
+test("the failover runs only on a refusal, and never onto the same origin", async () => {
+  // A 5xx is the pipeline's retry, not another provider's problem.
+  let chat = refusingChat({ status: 503 });
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "cerebras-qwen-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+    });
+    await assert.rejects(() => answerer.answerOnce({ question: "q" }), /HTTP 503/);
+    assert.equal(chat.calls.length, 1);
+  } finally {
+    chat.restore();
+  }
+  // Already answering on DeepSeek: another attempt on the same origin is pointless.
+  chat = refusingChat({ refuseOrigin: "https://api.deepseek.com" });
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "deepseek-flash",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+    });
+    await assert.rejects(() => answerer.answerOnce({ question: "q" }), /HTTP 402/);
+    assert.equal(chat.calls.length, 1);
+  } finally {
+    chat.restore();
+  }
+  // No DeepSeek key to fail over to: the refusal surfaces as before.
+  chat = refusingChat();
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "cerebras-qwen-thinking",
+      deepseekApiKey: null,
+      cerebrasAvailable: true,
+    });
+    await assert.rejects(() => answerer.answerOnce({ question: "q" }), /HTTP 402/);
+    assert.equal(chat.calls.length, 1);
+  } finally {
+    chat.restore();
+  }
+});

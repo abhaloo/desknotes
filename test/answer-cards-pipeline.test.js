@@ -81,7 +81,7 @@ test("answerCards off: no cards key reaches the answerer", async () => {
     assert.equal("cards" in answerer.calls[0], false, String(answerCards));
     assert.deepEqual(
       Object.keys(answerer.calls[0]).sort(),
-      ["context", "intent", "onCut", "question", "signal"].sort(),
+      ["context", "intent", "onCut", "onFallback", "question", "signal"].sort(),
     );
   }
 });

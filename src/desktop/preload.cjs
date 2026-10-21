@@ -73,6 +73,7 @@ const IPC = Object.freeze({
   SETTINGS_SET: "settings:set",
   SETTINGS_OPEN_FOLDER: "settings:openFolder",
   SETTINGS_OPEN_KNOWN_TERMS: "settings:openKnownTerms",
+  SETTINGS_OPEN_KEYS: "settings:openKeys",
 
   // practice / rehearsal (additive)
   PRACTICE_GET: "practice:get",
@@ -123,6 +124,7 @@ const COMMAND_CHANNELS = Object.freeze([
   IPC.SETTINGS_SET,
   IPC.SETTINGS_OPEN_FOLDER,
   IPC.SETTINGS_OPEN_KNOWN_TERMS,
+  IPC.SETTINGS_OPEN_KEYS,
   IPC.SHELL_ACTION,
   IPC.PANELS_SET,
   IPC.PRACTICE_SET_MATERIAL,
@@ -206,6 +208,11 @@ const api = {
   /** Open known-terms.txt (terms Terms never explains) in the default editor. */
   openKnownTerms() {
     return command(IPC.SETTINGS_OPEN_KNOWN_TERMS, null);
+  },
+
+  /** Open keys.env (the provider keys read at launch) for editing. */
+  openKeysFile() {
+    return command(IPC.SETTINGS_OPEN_KEYS, null);
   },
 
   /** Enable/disable the multi-answer panel windows (R1). */

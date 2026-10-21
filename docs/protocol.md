@@ -138,8 +138,14 @@ Stream indices and hello stream descriptors (topology "general"):
   answer lifecycle. `turn.started` carries `gate_seq` on the FIRST frame so
   the answer renders under its question immediately: `{turn_id, question?,
   intent, gate_seq?}`; `turn.token` = `{turn_id, delta}`; `turn.done` =
-  `{turn_id, text, gate_seq?}`; `turn.superseded` = `{turn_id}` (an in-flight
-  turn retired by a newer one). With highlights on (the default;
+  `{turn_id, text, gate_seq?, cut?, fallback?}`; `turn.superseded` = `{turn_id}` (an in-flight
+  turn retired by a newer one). `cut` is why the text is not the whole answer
+  (a card budget ran out). `fallback` = `{to, from?, reason?}` (additive) is
+  present only when a model other than the chosen one wrote the answer: short
+  model names and a reason code (`no_key`, `unavailable`, `out_of_credit`,
+  `key_rejected`, `refused`, `rate_limited`). The desktop overlay shows it as
+  one muted line after the card ("Fallback: DeepSeek Flash · Qwen 27B out of
+  credit"). With highlights on (the default;
   `HIGHLIGHTS=0` or the Settings checkbox "Highlight key phrases" turns them
   off) answer text may wrap key phrases in `**`: at most one pair per bullet
   and three per answer, each pair balanced and at most five words
@@ -177,9 +183,19 @@ Stream indices and hello stream descriptors (topology "general"):
   fabricates the flag. Transport-level failures carry a string tag on the
   client-side result's `failure` field: `upload` | `timeout` | `unreachable`.
 - `error` — `{v, type:"error", seq, data:{code, ...}}`. Codes `session_ended`
-  / `session_not_found` latch the session as terminal.
+  / `session_not_found` latch the session as terminal. `generation_failed`
+  carries the provider's message and closes the turn with empty text: the
+  desktop overlay turns it into one short toast naming the fix (no answer
+  model, out of credit, rejected key, rate limit, no connection;
+  `renderer/answer-error.js`), because an empty card alone reads as the app
+  ignoring the call. Live mode has no demo answers: with no usable answer
+  model every turn fails this way ("answerer: no answer model is set up").
 - `error.retry` — `{v, type:"error.retry", seq, data:{turn_id, attempt}}`:
-  a generation error the server is retrying transparently.
+  a generation error the server is retrying transparently (the overlay shows
+  "The answer model faltered. Retrying now."). A refusal is not retried: a
+  non-retryable status (401/402/403/429, or `x-should-retry: false`) is
+  replayed on the failover engine instead, and only a real failure emits
+  `error`.
 - `session.ended` — terminal. Any later close is terminal for the client.
 - `pong`.
 

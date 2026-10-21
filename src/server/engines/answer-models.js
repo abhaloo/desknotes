@@ -48,17 +48,30 @@ export const ANSWER_MODEL_CHOICES = Object.freeze([
   Object.freeze({
     id: DEFAULT_ANSWER_MODEL,
     label: "DeepSeek V4.1 Flash",
+    short: "DeepSeek Flash",
     model: DEEPSEEK.models.flash,
     thinking: "enabled",
   }),
   Object.freeze({
     id: "deepseek-flash",
     label: "DeepSeek V4.1 Flash (fast)",
+    short: "DeepSeek Flash (fast)",
     model: DEEPSEEK.models.flash,
     thinking: "disabled",
   }),
-  Object.freeze({ id: CEREBRAS_THINKING_MODEL, label: "Qwen 27B thinking (Cerebras)" }),
+  Object.freeze({ id: CEREBRAS_THINKING_MODEL, label: "Qwen 27B thinking (Cerebras)", short: "Qwen 27B" }),
 ]);
+
+/**
+ * The few words that name an engine in the overlay's fallback note:
+ * "DeepSeek Flash", "Qwen 27B", or the model id of any other engine.
+ * @param {{baseUrl?: string, model?: string, thinking?: string}} [options]
+ */
+export function engineShortName({ baseUrl, model, thinking } = {}) {
+  if (baseUrl && sameOrigin(baseUrl, DEEPSEEK.baseUrl)) return thinking === "enabled" ? "DeepSeek Flash" : "DeepSeek Flash (fast)";
+  if (isCerebrasEngine(baseUrl) && /^qwen-[\d.]+-27b$/i.test(String(model ?? ""))) return "Qwen 27B";
+  return typeof model === "string" && model.length > 0 ? model : "another model";
+}
 
 /**
  * Ids that earlier builds saved, and the choice each one now means. "" was
