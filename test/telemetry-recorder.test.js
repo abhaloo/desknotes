@@ -80,17 +80,17 @@ function linesOf(fs, path) {
     .map((line) => JSON.parse(line));
 }
 
-test("recorderOptionsFromEnv: enabled by default, off when SESSION_TELEMETRY is 0, false, or off", () => {
+test("recorderOptionsFromEnv: off by default, on only when SESSION_TELEMETRY is 1, true, or on", () => {
   assert.deepEqual(recorderOptionsFromEnv({}), {
-    enabled: true,
+    enabled: false,
     dir: join(process.cwd(), "logs", "telemetry"),
     keepDays: 7,
   });
-  for (const value of [undefined, "", "1", "true", "yes", "01"]) {
-    assert.equal(recorderOptionsFromEnv({ SESSION_TELEMETRY: value }).enabled, true, `expected enabled for ${value}`);
-  }
-  for (const value of ["0", "false", "off", "0 ", "FALSE", "Off"]) {
+  for (const value of [undefined, "", "0", "false", "off", "yes", "01", "nope"]) {
     assert.equal(recorderOptionsFromEnv({ SESSION_TELEMETRY: value }).enabled, false, `expected disabled for ${value}`);
+  }
+  for (const value of ["1", "true", "on", " 1 ", "TRUE", "On"]) {
+    assert.equal(recorderOptionsFromEnv({ SESSION_TELEMETRY: value }).enabled, true, `expected enabled for ${value}`);
   }
 
   assert.equal(recorderOptionsFromEnv({ SESSION_TELEMETRY_DIR: "C:\\logs" }).dir, "C:\\logs");
@@ -105,27 +105,27 @@ test("recorderOptionsFromEnv: enabled by default, off when SESSION_TELEMETRY is 
   }
 });
 
-test("createSessionRecorder: enabled by default", async () => {
+test("createSessionRecorder: off by default, writes no files without opt-in", async () => {
   const fs = fakeFs();
   const rec = createSessionRecorder({ dir: DIR, fs, now: msClock() });
   rec.record({ type: "turn.start", sessionId: "s" });
   await rec.flush();
   await rec.close();
-  assert.ok(fs.calls.some((c) => c.op === "appendFile"), "expected appendFile calls because recorder is enabled by default");
+  assert.deepEqual(fs.calls, [], "expected no filesystem calls without opt-in");
 });
 
-test("buildEngineConfig wires telemetryOptions with always-on default", () => {
+test("buildEngineConfig wires telemetryOptions with logging off by default", () => {
   const config = buildEngineConfig({}, { mode: "demo" });
-  assert.equal(config.telemetryOptions.enabled, true);
+  assert.equal(config.telemetryOptions.enabled, false);
   assert.equal(config.telemetryOptions.keepDays, 7);
   assert.equal(config.telemetryOptions.dir, join(process.cwd(), "logs", "telemetry"));
 
   const customDir = buildEngineConfig({}, { mode: "demo", telemetryDir: "C:\\custom\\telemetry" });
   assert.equal(customDir.telemetryOptions.dir, "C:\\custom\\telemetry");
-  assert.equal(customDir.telemetryOptions.enabled, true);
+  assert.equal(customDir.telemetryOptions.enabled, false);
 
-  const disabled = buildEngineConfig({ SESSION_TELEMETRY: "0" }, { mode: "demo" });
-  assert.equal(disabled.telemetryOptions.enabled, false);
+  const optedIn = buildEngineConfig({ SESSION_TELEMETRY: "1" }, { mode: "demo" });
+  assert.equal(optedIn.telemetryOptions.enabled, true);
 });
 
 test("disabled: record/flush/close touch no filesystem", async () => {

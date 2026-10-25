@@ -208,10 +208,10 @@ DeskNotes keeps your settings, documents and answer instructions in
 `%APPDATA%\DeskNotes`. To use another folder, set `DESKNOTES_DATA_DIR` to an
 absolute path. **Settings > Open settings folder** opens it.
 
-Session logs include transcripts and answers. DeskNotes writes them to
-`logs\telemetry` in that folder and deletes them after 7 days. Set
-`SESSION_TELEMETRY=0` to turn them off, or `SESSION_TELEMETRY_KEEP_DAYS` to
-keep them longer or shorter.
+Session logs are off by default, so DeskNotes saves no transcripts to disk.
+If you set `SESSION_TELEMETRY=1`, it writes logs with transcripts and answers
+to `logs\telemetry` in that folder and deletes them after 7 days. Set
+`SESSION_TELEMETRY_KEEP_DAYS` to keep them longer or shorter.
 
 Audio goes only to your speech-to-text provider. Transcripts go to your
 answer and judge providers. A screenshot leaves your PC only when you ask

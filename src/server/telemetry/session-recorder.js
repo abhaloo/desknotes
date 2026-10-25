@@ -11,8 +11,8 @@
  * Secrets: callers never put credentials in events. As a second line of
  * defence any field whose key looks credential-shaped is redacted here.
  *
- * Enabled by default; disabled when SESSION_TELEMETRY=0, false, or off.
- * A disabled recorder touches no filesystem.
+ * Off by default (logs hold call transcripts). Opt in with SESSION_TELEMETRY=1,
+ * true, or on. A disabled recorder touches no filesystem.
  */
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
@@ -40,9 +40,9 @@ export function recorderOptionsFromEnv(env = process.env, { dir: defaultDir } = 
       : defaultDir ?? join(process.cwd(), "logs", "telemetry");
   const parsed = Number.parseInt(String(source.SESSION_TELEMETRY_KEEP_DAYS ?? ""), 10);
   const rawSwitch = typeof source.SESSION_TELEMETRY === "string" ? source.SESSION_TELEMETRY.trim().toLowerCase() : "";
-  const disabled = rawSwitch === "0" || rawSwitch === "false" || rawSwitch === "off";
+  const enabled = rawSwitch === "1" || rawSwitch === "true" || rawSwitch === "on";
   return {
-    enabled: !disabled,
+    enabled,
     dir,
     keepDays: Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_KEEP_DAYS,
   };
@@ -56,7 +56,7 @@ export function recorderOptionsFromEnv(env = process.env, { dir: defaultDir } = 
  * @returns {{record: (event: object) => void, flush: () => Promise<void>, close: () => Promise<void>}}
  */
 export function createSessionRecorder({
-  enabled = true,
+  enabled = false,
   dir,
   keepDays = DEFAULT_KEEP_DAYS,
   fs = nodeFs,

@@ -548,20 +548,20 @@ the question-to-first-token path awaits, reads or locks anything the glossary us
 
 ## Session telemetry recorder — `src/server/telemetry/session-recorder.js`
 
-Buffered JSONL session logs for support and latency forensics. On by default:
-`SESSION_TELEMETRY=0`, `false`, or `off` turns it off. A disabled recorder touches no filesystem at
+Buffered JSONL session logs for support and latency forensics. Off by default
+(logs hold call transcripts). `SESSION_TELEMETRY=1`, `true`, or `on` turns it on. A disabled recorder touches no filesystem at
 all. The desktop app writes telemetry to `%APPDATA%\DeskNotes\logs\telemetry` (or `DESKNOTES_DATA_DIR`),
 while standalone servers default to `<cwd>/logs/telemetry`. The server wires one recorder per session
 through `createEngineFactory`; the pipeline receives it as the `telemetry` option.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `SESSION_TELEMETRY` | on | `0`, `false`, or `off` disables recording; anything else (unset, empty, `1`) is on. |
+| `SESSION_TELEMETRY` | off | `1`, `true`, or `on` enables recording; anything else (unset, empty, `0`) is off. |
 | `SESSION_TELEMETRY_DIR` | `<cwd>/logs/telemetry` (standalone) or `<userData>/logs/telemetry` (desktop) | Directory for the JSONL files. |
 | `SESSION_TELEMETRY_KEEP_DAYS` | 7 | Positive integer. `*.jsonl` older than this is deleted at construction. |
 
 `recorderOptionsFromEnv(env, { dir: defaultDir } = {}) -> { enabled, dir, keepDays }`.
-`createSessionRecorder({ enabled = true, dir, keepDays, fs, now, log }) -> { record, flush, close }`.
+`createSessionRecorder({ enabled = false, dir, keepDays, fs, now, log }) -> { record, flush, close }`.
 
 - `record(event)` never blocks the caller: the event is stamped and buffered in
   memory, and batches are written by an unref'd 250 ms timer, on `flush()`, or on
