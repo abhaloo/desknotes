@@ -37,6 +37,9 @@ import { createGroundingDocumentStore, documentMetadata, STORED_DOCUMENT_UNREADA
 import { createCustomerProfileStore, profileMetadata, renderProfileText } from "./customer-profiles.js";
 import { createPracticeMaterialStore } from "./practice/material.js";
 import { createPracticeDebriefStore } from "./practice-debrief.js";
+import { createRecapRecorder } from "./recap/recorder.js";
+import { recapNotes } from "./recap/build.js";
+import { createRecapStore, isRecapId, summarizeRecap } from "./recap/store.js";
 import { createQuestionSegmenter } from "./practice/segmenter.js";
 import { createPracticeSession } from "./practice/session.js";
 import { buildDebrief, formatDebrief } from "./practice/debrief.js";
@@ -59,8 +62,11 @@ const RENDERER_DIR = join(__dirname, "renderer");
 const RENDERER_PAGE = join(RENDERER_DIR, "index.html");
 const CAPTURE_PAGE = join(__dirname, "capture", "capture.html");
 const PRACTICE_PAGE = join(RENDERER_DIR, "practice.html");
+const RECAP_PAGE = join(RENDERER_DIR, "recap.html");
 /** The practice page may call only the practice:* channels it uses, nothing else on the bridge. */
 const PRACTICE_SENDER_PAGES = Object.freeze(["index.html", "practice.html"]);
+/** The recap page may read a recap (recap:get) and nothing else on the bridge. */
+const RECAP_SENDER_PAGES = Object.freeze(["index.html", "recap.html"]);
 const APP_TITLE = "DeskNotes";
 
 /**
@@ -134,11 +140,15 @@ const OVERLAY = Object.freeze({ width: 424, height: 860, margin: 16, top: 24 });
 const SPEECH_STATS_INTERVAL_MS = 1000;
 /** before-quit waits this long for a normal stop, then kills a stuck worker. */
 const QUIT_STOP_TIMEOUT_MS = 2000;
+/** ...and this long for the session to end and its recap to reach the disk (src/desktop/recap/). */
+const RECAP_QUIT_TIMEOUT_MS = 3000;
+/** Recaps whose save failed stay readable for the run; this many at most. */
+const UNSAVED_RECAPS_MAX = 3;
 const AUDIO_SOURCES = Object.freeze(["microphone", "system"]);
 const boundAudioHosts = new WeakSet();
 
 const state = {
-  windows: { main: null, overlay: null, panels: [], practice: null },
+  windows: { main: null, overlay: null, panels: [], practice: null, recap: null },
   lifecycle: null,
   gateway: null,
   transport: null,
@@ -185,6 +195,10 @@ const state = {
     answerer: null,
     segmenter: null,
   },
+  /** Session recap recorder (recap/recorder.js): subscribes itself at boot; nothing on the call path knows it. */
+  recap: null,
+  /** Session recaps on disk (recap/store.js), the latest one of this run, and the ones whose save failed. */
+  recaps: { store: null, latest: null, unsaved: new Map() },
   /** App settings (app-preferences.js). OFF until loaded: nothing auto-starts on a read we never did. */
   appPreferences: null,
   settings: { autoStart: false, answerModel: "", windowOpacity: WINDOW_OPACITY.default, readError: null },
@@ -329,6 +343,16 @@ function currentAnswerCards() {
 function currentGlossary() {
   if (typeof state.settings?.glossary === "boolean") return state.settings.glossary;
   return parseGlossarySwitch(process.env.GLOSSARY) !== false;
+}
+
+/**
+ * Settings > "Save a recap of each session" (src/desktop/recap/). Read once
+ * per session, when it goes active: a session that started with it on is
+ * recorded to its end. On unless the settings file says false.
+ */
+function currentSessionRecap() {
+  if (typeof state.settings?.sessionRecap === "boolean") return state.settings.sessionRecap;
+  return true;
 }
 
 /** A practice answer follows the same card and highlight settings as a live one. */
@@ -585,6 +609,44 @@ function openPracticeWindow() {
   }
   state.windows.practice = createPracticeWindow();
   return state.windows.practice;
+}
+
+/**
+ * The recap window is a normal window like practice: framed, resizable, in
+ * Alt-Tab, never always-on-top. It shows one session (recap.html?id=...) and
+ * reads it through recap:get, the only channel its page may call.
+ */
+function createRecapWindow(id) {
+  const win = new BrowserWindow({
+    width: 880,
+    height: 760,
+    title: "DeskNotes — Session recap",
+    webPreferences: baseWebPreferences(),
+  });
+  // Narrowed to recap.html alone: never an unprotected copy of the overlay page.
+  hardenWebContents(win.webContents, { pages: [RECAP_PAGE], log: (entry) => warn(`recap blocked: ${entry.type}`) });
+  win.loadFile(RECAP_PAGE, { query: { id } });
+  win.on("closed", () => {
+    state.windows.recap = null;
+  });
+  return win;
+}
+
+/** One recap window: an open one switches to `id` and comes forward. */
+function openRecapWindow(id) {
+  const existing = state.windows.recap;
+  if (existing && !existing.isDestroyed()) {
+    if (existing.__recapId !== id) {
+      existing.__recapId = id;
+      existing.loadFile(RECAP_PAGE, { query: { id } });
+    }
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return existing;
+  }
+  state.windows.recap = createRecapWindow(id);
+  state.windows.recap.__recapId = id;
+  return state.windows.recap;
 }
 
 /**
@@ -1669,6 +1731,22 @@ function onBeforeQuit(event) {
     } else {
       state.audio.lastCleanup = { forcedCleanup: false };
     }
+    // The session ends HERE, not in will-quit: the lifecycle must reach
+    // `ended` so the recap recorder finishes, and its save must land, before
+    // the process exits. A stop that hung above blocks the speech chain, so
+    // the chain is reset first and the whole wait is bounded: a stuck disk
+    // or worker can delay quitting by RECAP_QUIT_TIMEOUT_MS, never block it.
+    if (outcome === "timeout") state.audio.speechChain = Promise.resolve();
+    let recapTimer = null;
+    const recapDeadline = new Promise((resolve) => {
+      recapTimer = setTimeout(() => resolve("timeout"), RECAP_QUIT_TIMEOUT_MS);
+    });
+    const saved = Promise.resolve()
+      .then(() => endSession("quit"))
+      .then(() => state.recap?.settled())
+      .then(() => "saved", () => "saved");
+    if ((await Promise.race([saved, recapDeadline])) === "timeout") warn("quit: the session recap did not finish saving in time");
+    if (recapTimer) clearTimeout(recapTimer);
     state.audio.quitSettled = true;
     state.audio.phase = "idle";
     publishAudioStatus();
@@ -2304,6 +2382,8 @@ function querySettings() {
     // Terms needs DEEPSEEK_API_KEY (deepseekAvailable); the Settings note says so.
     glossary: currentGlossary(),
     knownTermsPath: knownTermsPath(),
+    // Session recaps (src/desktop/recap/): saved when a live session ends.
+    sessionRecap: currentSessionRecap(),
     readError: state.settings.readError,
   };
 }
@@ -2413,6 +2493,98 @@ async function commandEndPractice() {
   return okEnvelope({ debrief: payload, ...(saveError ? { saveError } : {}) });
 }
 
+/* --------------------------------------------------------------- session recap */
+
+function recapStore() {
+  if (!state.recaps.store) state.recaps.store = createRecapStore({ userDataDir: userDataDirectory() });
+  return state.recaps.store;
+}
+
+/**
+ * The recorder finished a session. A recap whose save failed is kept in
+ * memory for this run, so the button and the window still work; the save
+ * error travels with the announcement.
+ */
+function onRecapSaved({ id, recap, summary, saveError }) {
+  if (saveError) {
+    state.recaps.unsaved.set(id, recap);
+    while (state.recaps.unsaved.size > UNSAVED_RECAPS_MAX) state.recaps.unsaved.delete(state.recaps.unsaved.keys().next().value);
+  }
+  state.recaps.latest = summary ?? summarizeRecap(recap);
+  // `notes`: the recording hit its cap or stopped early (build.js recapNotes); the renderer shows them behind an icon.
+  broadcast(IPC.RECAP_READY, { id, summary: state.recaps.latest, saveError: saveError ?? null, notes: recapNotes(recap) });
+}
+
+async function queryRecapList() {
+  let sessions = [];
+  let readError = null;
+  try {
+    ({ sessions, readError } = await recapStore().list());
+  } catch (error) {
+    warn(`recap list failed: ${errorText(error)}`);
+    readError = "The saved session recaps couldn't be listed.";
+  }
+  return { enabled: currentSessionRecap(), latest: state.recaps.latest, sessions, readError };
+}
+
+/** The recap with its text, from memory when its save failed, else from disk. */
+async function loadRecap(id) {
+  const unsaved = state.recaps.unsaved.get(id);
+  if (unsaved) return { recap: unsaved, readError: null };
+  return recapStore().get(id);
+}
+
+async function queryRecap(payload) {
+  const id = payload && typeof payload === "object" ? payload.id : undefined;
+  if (!isRecapId(id)) return failEnvelope(ErrorCode.INVALID_PAYLOAD, "recap:get takes { id: string }.");
+  let loaded;
+  try {
+    loaded = await loadRecap(id);
+  } catch (error) {
+    return failEnvelope(error?.code ?? "E_RECAP_UNREADABLE", errorText(error));
+  }
+  if (loaded.readError) return failEnvelope("E_RECAP_UNREADABLE", loaded.readError);
+  if (!loaded.recap) return failEnvelope("E_RECAP_NOT_FOUND", "This session recap no longer exists.");
+  return okEnvelope({ recap: loaded.recap });
+}
+
+/** Opens the recap window on `id`, or on the latest recap of this run. */
+async function commandOpenRecap(payload = {}) {
+  const valid = payload && typeof payload === "object" && !Array.isArray(payload) && (!("id" in payload) || isRecapId(payload.id));
+  if (!valid) return failEnvelope(ErrorCode.INVALID_PAYLOAD, "recap:open takes { id?: string }.");
+  const id = payload.id ?? state.recaps.latest?.id ?? null;
+  if (!id) return failEnvelope("E_RECAP_NOT_FOUND", "There is no session recap to open yet.");
+  let loaded;
+  try {
+    loaded = await loadRecap(id);
+  } catch (error) {
+    return failEnvelope(error?.code ?? "E_RECAP_UNREADABLE", errorText(error));
+  }
+  if (!loaded.recap && !loaded.readError) return failEnvelope("E_RECAP_NOT_FOUND", "This session recap no longer exists.");
+  return okEnvelope({ opened: Boolean(openRecapWindow(id)), id });
+}
+
+/** { id } removes one recap, { all: true } every recap; the files are the only copy. */
+async function commandDeleteRecap(payload = {}) {
+  const all = payload && typeof payload === "object" && payload.all === true && !("id" in payload);
+  const one = payload && typeof payload === "object" && !("all" in payload) && isRecapId(payload.id);
+  if (!all && !one) return failEnvelope(ErrorCode.INVALID_PAYLOAD, "recap:delete takes { id: string } or { all: true }.");
+  try {
+    if (all) {
+      const { removed } = await recapStore().clear();
+      state.recaps.unsaved.clear();
+      state.recaps.latest = null;
+      return okEnvelope({ removed });
+    }
+    const { removed } = await recapStore().remove(payload.id);
+    const held = state.recaps.unsaved.delete(payload.id);
+    if (state.recaps.latest?.id === payload.id) state.recaps.latest = null;
+    return okEnvelope({ removed: removed || held ? 1 : 0 });
+  } catch (error) {
+    return failEnvelope(error?.code ?? "E_RECAP_SAVE", errorText(error));
+  }
+}
+
 /**
  * Listen as soon as the app opens. Runs once at boot, after the windows exist
  * and protection is enforced, through the same startSession() path as the
@@ -2454,6 +2626,8 @@ function registerIpcRoutes() {
     [IPC.PROFILES_LIST]: () => queryProfiles(),
     [IPC.SETTINGS_GET]: () => querySettings(),
     [IPC.PRACTICE_GET]: () => queryPractice(),
+    [IPC.RECAP_LIST]: () => queryRecapList(),
+    [IPC.RECAP_GET]: (payload) => queryRecap(payload),
   };
   const commands = {
     [IPC.SPEECH_START]: () => startSpeech(),
@@ -2524,6 +2698,8 @@ function registerIpcRoutes() {
     [IPC.PRACTICE_START]: () => commandStartPractice(),
     [IPC.PRACTICE_END]: () => commandEndPractice(),
     [IPC.PRACTICE_OPEN]: () => okEnvelope({ opened: Boolean(openPracticeWindow()) }),
+    [IPC.RECAP_OPEN]: (payload) => commandOpenRecap(payload),
+    [IPC.RECAP_DELETE]: (payload) => commandDeleteRecap(payload),
   };
 
   // Only the app's own top-level page may call in: a navigated window, a
@@ -2531,10 +2707,13 @@ function registerIpcRoutes() {
   // The practice page is trusted for the practice channels it uses and no
   // others: it can never reach session or shell commands.
   const practiceChannels = new Set([IPC.PRACTICE_GET, IPC.PRACTICE_SET_MATERIAL, IPC.PRACTICE_START, IPC.PRACTICE_END]);
+  // The recap page reads the one recap it shows; listing, opening and deleting stay with the control window.
+  const recapChannels = new Set([IPC.RECAP_GET]);
   const guard = (fn, channel) =>
     guardIpcHandler(fn, {
       rendererDir: RENDERER_DIR,
       ...(practiceChannels.has(channel) ? { trustedPages: PRACTICE_SENDER_PAGES } : {}),
+      ...(recapChannels.has(channel) ? { trustedPages: RECAP_SENDER_PAGES } : {}),
       log: (entry) => warn(`ipc refused: ${entry.type}`),
     });
   for (const [channel, handler] of Object.entries(queries)) {
@@ -2590,7 +2769,7 @@ function hardenSessions() {
   app.on("web-contents-created", (_event, contents) => {
     // App windows: index.html, plus practice.html for the practice window
     // (which narrows itself further in createPracticeWindow).
-    const pages = contents.session === captureSession ? [CAPTURE_PAGE] : [RENDERER_PAGE, PRACTICE_PAGE];
+    const pages = contents.session === captureSession ? [CAPTURE_PAGE] : [RENDERER_PAGE, PRACTICE_PAGE, RECAP_PAGE];
     hardenWebContents(contents, { pages, log: (entry) => warn(`blocked: ${entry.type}`) });
   });
   lockDownSession(electronSession.defaultSession);
@@ -2980,6 +3159,22 @@ async function bootstrap() {
         /* already dead */
       }
     }
+  });
+
+  // Session recaps (src/desktop/recap/): the recorder subscribes to the
+  // lifecycle and the bus itself, so handleServerFrame, startSession and
+  // endSession carry no recap code. The setting is read when a session goes
+  // active; frames during practice are left out; a finished recap is saved
+  // and announced to every window.
+  state.recap = createRecapRecorder({
+    lifecycle: state.lifecycle,
+    bus: state.gateway,
+    isEnabled: () => currentSessionRecap(),
+    isPractice: () => Boolean(state.practice.session?.isActive()),
+    sessionId: () => state.sessionId,
+    save: (recap) => recapStore().save(recap),
+    onSaved: onRecapSaved,
+    log: (entry) => warn(`recap ${entry.type}: ${entry.message ?? ""}`),
   });
 
   await loadDesktopSettings();

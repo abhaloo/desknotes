@@ -24,16 +24,16 @@ const DEFAULT = "deepseek-flash-thinking";
 
 test("first run (no file) means auto-start on and the default answer model (DeepSeek V4.1 Flash, thinking on)", () =>
   withDir(async (dir) => {
-    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: true, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
+    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: true, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
   }));
 
-test("save persists and reloads; the file holds only version, autoStart, answerModel, windowOpacity, repContext, highlights, answerCards and glossary", () =>
+test("save persists and reloads; the file holds only version, autoStart, answerModel, windowOpacity, repContext, highlights, answerCards, glossary and sessionRecap", () =>
   withDir(async (dir) => {
     const prefs = createAppPreferences({ userDataDir: dir });
-    assert.deepEqual(await prefs.save({ autoStart: false }), { autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
-    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
+    assert.deepEqual(await prefs.save({ autoStart: false }), { autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
+    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
     const stored = JSON.parse(await readFile(path.join(dir, APP_PREFERENCES_FILENAME), "utf8"));
-    assert.deepEqual(stored, { version: 1, autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true });
+    assert.deepEqual(stored, { version: 1, autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true });
   }));
 
 test("saving one setting keeps the other", () =>
@@ -41,8 +41,8 @@ test("saving one setting keeps the other", () =>
     const prefs = createAppPreferences({ userDataDir: dir });
     await prefs.load();
     await prefs.save({ answerModel: "cerebras-qwen-thinking" });
-    assert.deepEqual(await prefs.save({ autoStart: false }), { autoStart: false, answerModel: "cerebras-qwen-thinking", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
-    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: false, answerModel: "cerebras-qwen-thinking", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
+    assert.deepEqual(await prefs.save({ autoStart: false }), { autoStart: false, answerModel: "cerebras-qwen-thinking", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
+    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: false, answerModel: "cerebras-qwen-thinking", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
   }));
 
 test("a value an earlier build saved migrates to a listed choice; an unknown one reads as the default", () =>
@@ -63,17 +63,17 @@ test("a value an earlier build saved migrates to a listed choice; an unknown one
     ];
     for (const [saved, expected] of cases) {
       await writeFile(file, JSON.stringify({ version: 1, autoStart: true, answerModel: saved }));
-      assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: true, answerModel: expected, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null }, `saved ${JSON.stringify(saved)}`);
+      assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: true, answerModel: expected, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null }, `saved ${JSON.stringify(saved)}`);
     }
     // A file written before the answer model existed is still valid.
     await writeFile(file, JSON.stringify({ version: 1, autoStart: false }));
-    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
+    assert.deepEqual(await createAppPreferences({ userDataDir: dir }).load(), { autoStart: false, answerModel: DEFAULT, windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
     // The migrated value is what the next save writes.
     await writeFile(file, JSON.stringify({ version: 1, autoStart: true, answerModel: "deepseek-v4-pro" }));
     const prefs = createAppPreferences({ userDataDir: dir });
     await prefs.load();
     await prefs.save({ autoStart: false });
-    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true });
+    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true });
   }));
 
 test("a damaged or wrong-shaped file never auto-starts", () =>
@@ -88,6 +88,7 @@ test("a damaged or wrong-shaped file never auto-starts", () =>
         highlights: true,
         answerCards: true,
         glossary: true,
+        sessionRecap: true,
         readError: SETTINGS_UNREADABLE,
       });
     }
@@ -100,7 +101,7 @@ test("window opacity persists beside the other settings and is clamped to 30-100
     const prefs = createAppPreferences({ userDataDir: dir });
     await prefs.load();
     assert.equal((await prefs.save({ windowOpacity: 0.55 })).windowOpacity, 0.55);
-    assert.deepEqual(await prefs.save({ autoStart: false }), { autoStart: false, answerModel: DEFAULT, windowOpacity: 0.55, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null });
+    assert.deepEqual(await prefs.save({ autoStart: false }), { autoStart: false, answerModel: DEFAULT, windowOpacity: 0.55, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null });
     assert.equal((await createAppPreferences({ userDataDir: dir }).load()).windowOpacity, 0.55);
     assert.equal((await prefs.save({ windowOpacity: 0 })).windowOpacity, 0.3, "never invisible");
     assert.equal((await prefs.save({ windowOpacity: 7 })).windowOpacity, 1);

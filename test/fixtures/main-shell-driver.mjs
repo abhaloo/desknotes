@@ -9,8 +9,9 @@
  *   DRIVER_MODE=practice  practice wiring: external server whose engine can emit transcript frames
  *   DRIVER_MODE=profiles  customer profiles: the store at boot, the profiles:* channels, and the
  *                         session_context pushes they cause (customer-profiles-main.test.js)
+ *   DRIVER_MODE=recap     session recap: frames injected on a real socket, saved on end and on quit
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { register } from "node:module";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -105,6 +106,40 @@ if (mode === "practice") {
     return {
       onSessionStart(payload) {
         practiceSeen.starts.push(payload?.sessionId ?? null);
+      },
+      onAudio() {},
+      onFinalize() {},
+      onTurnHint() {},
+      onContextSet() {},
+      onSessionEnd() {},
+      dispose() {},
+    };
+  };
+  external = new RealtimeServer({ port: 0, createEngine, verifyToken: (jwt) => jwt === "external-secret" });
+  const { url } = await external.start();
+  process.env.REALTIME_URL = url;
+}
+
+let recapUserData = null;
+let recapSeen = null;
+if (mode === "recap") {
+  // Like practice: an external server whose engine hands the driver its
+  // `emit`, so frames reach main exactly the way the socket delivers them.
+  // Every session:start opens a fresh connection and a fresh engine.
+  globalThis.__COPILOT_SHELL_LIBRARY__ = true;
+  process.env.CAPTURE_BACKEND = "simulated";
+  process.env.VAD_ENABLED = "0";
+  process.env.EMBEDDED_SERVER = "0";
+  process.env.JWT = "external-secret";
+  recapUserData = mkdtempSync(join(tmpdir(), "recap-userdata-"));
+  recapSeen = { engines: 0, emit: null, starts: [] };
+  const { RealtimeServer } = await import("../../src/server/ws-server.js");
+  const createEngine = ({ emit }) => {
+    recapSeen.engines += 1;
+    recapSeen.emit = emit;
+    return {
+      onSessionStart(payload) {
+        recapSeen.starts.push(payload?.sessionId ?? null);
       },
       onAudio() {},
       onFinalize() {},
@@ -691,6 +726,19 @@ async function runGrounding(desktop) {
     settings: (await fake.invoke("settings:get")).value?.glossary ?? null,
   });
 
+  // Save a recap of each session: a boolean persists; anything else is refused.
+  const srOff = await fake.invoke("settings:set", { sessionRecap: false });
+  const srBad = await fake.invoke("settings:set", { sessionRecap: "off" });
+  const srStoredOff = readStored();
+  const srOn = await fake.invoke("settings:set", { sessionRecap: true });
+  step("sessionRecap", {
+    off: srOff.value?.sessionRecap ?? null,
+    badCode: srBad.error?.code ?? null,
+    storedOff: srStoredOff,
+    on: srOn.value?.sessionRecap ?? null,
+    settings: (await fake.invoke("settings:get")).value?.sessionRecap ?? null,
+  });
+
   // known-terms.txt: seeded empty at boot; "Known terms…" opens it, recreating a deleted file first.
   const knownTermsFile = join(groundingUserData, "known-terms.txt");
   const knownSeeded = existsSync(knownTermsFile) ? readFileSync(knownTermsFile, "utf8") : null;
@@ -797,6 +845,218 @@ async function runGrounding(desktop) {
     hint: (shortcuts.value?.bindings ?? []).find((b) => b.action === "quit") ?? null,
   });
   await fake.invoke("session:end");
+  try { await external?.stop?.(); } catch { /* already stopped */ }
+}
+
+/** The frames of one short, answered question, as the pipeline sends them. */
+function recapCallFrames() {
+  return [
+    { v: 1, type: "transcript", data: { text: "How does", final: false, role: "prospect", source: "system", stream: 1, segment_id: "s1" } },
+    { v: 1, type: "transcript", data: { text: "How does SSO work?", final: true, role: "prospect", source: "system", stream: 1, segment_id: "s1" } },
+    { v: 1, type: "gate.verdict", data: { gate_seq: 1, verdict: "answer", turn_id: "t1" } },
+    { v: 1, type: "turn.started", data: { turn_id: "t1", question: "How does SSO work?", intent: "final", gate_seq: 1 } },
+    { v: 1, type: "turn.token", data: { turn_id: "t1", delta: "VERDICT: " } },
+    { v: 1, type: "turn.done", data: { turn_id: "t1", text: "VERDICT: SAML or OIDC.", gate_seq: 1 } },
+    { v: 1, type: "terms", data: { turn_id: "t1", terms: [{ term: "OIDC", full_name: "OpenID Connect", what: "A sign-on layer." }] } },
+    { v: 1, type: "transcript", data: { text: "We support both.", final: true, role: "rep", source: "mic", stream: 0, segment_id: "r1" } },
+  ];
+}
+
+async function runRecap(desktop) {
+  await desktop.createMainShell({ userDataDir: recapUserData });
+  await waitFor(() => fake.ipcHandlers.has("recap:list") && fake.BrowserWindow.getAllWindows().length > 0);
+  const sessionsDir = join(recapUserData, "sessions");
+  const recapFiles = () =>
+    existsSync(sessionsDir) ? readdirSync(sessionsDir).filter((name) => name.endsWith(".json") && name !== "index.json").sort() : [];
+  const readyFor = (since) => broadcasts("recap:ready", since).map((m) => m.payload);
+  const code = (envelope) => (envelope.ok ? null : envelope.error?.code ?? null);
+
+  /** One session: start, wait for its engine, send `frames` on the socket, let them land. */
+  async function liveSession(frames) {
+    const engines = recapSeen.engines;
+    const started = await fake.invoke("session:start", {});
+    await waitFor(() => recapSeen.engines > engines && typeof recapSeen.emit === "function", 8000);
+    await waitFor(() => recapSeen.starts.length >= recapSeen.engines, 5000);
+    for (const frame of frames) {
+      recapSeen.emit(frame);
+      await delay(10);
+    }
+    await delay(300);
+    return started;
+  }
+
+  /** Ends the session and reports the recap:ready it produced (or null after `quietMs`). */
+  async function endAndAwaitReady(quietMs = 3000) {
+    const mark = Date.now();
+    const ended = await fake.invoke("session:end");
+    const ready = await waitFor(() => readyFor(mark)[0] ?? null, quietMs);
+    return { ended, ready, readyCount: readyFor(mark).length };
+  }
+
+  const settings = await fake.invoke("settings:get");
+  const empty = await fake.invoke("recap:list");
+  step("defaults", {
+    sessionRecap: settings.value?.sessionRecap ?? null,
+    list: empty.value ?? null,
+    files: recapFiles().length,
+  });
+
+  // 1. A recorded call: saved on session:end, announced, listed, readable.
+  const started = await liveSession(recapCallFrames());
+  const first = await endAndAwaitReady();
+  const sessionId = started.value?.sessionId ?? null;
+  const listed = await fake.invoke("recap:list");
+  const got = await fake.invoke("recap:get", { id: sessionId });
+  const files = recapFiles();
+  const onDisk = files.length === 1 ? JSON.parse(readFileSync(join(sessionsDir, files[0]), "utf8")) : null;
+  const recap = got.value?.recap ?? null;
+  step("recorded", {
+    sessionId,
+    readyCount: first.readyCount,
+    ready: first.ready ? { id: first.ready.id, saveError: first.ready.saveError ?? null, questions: first.ready.summary?.stats?.questions ?? null } : null,
+    readyWindows: new Set(fake.sent.filter((m) => m.channel === "recap:ready").map((m) => m.windowId)).size,
+    files: files.length,
+    fileHasId: files.length === 1 && files[0].includes(sessionId ?? "missing"),
+    listIds: (listed.value?.sessions ?? []).map((s) => s.id),
+    latestId: listed.value?.latest?.id ?? null,
+    enabled: listed.value?.enabled ?? null,
+    lineTypes: (recap?.lines ?? []).map((line) => line.type),
+    stamped: (recap?.lines ?? []).every((line) => typeof line.at === "string" && Number.isFinite(line.offsetMs)),
+    ordered: (recap?.lines ?? []).every((line, i, all) => i === 0 || Date.parse(all[i - 1].at) <= Date.parse(line.at)),
+    heardBeforeFinal: recap ? Date.parse(recap.lines[0].heardAt) <= Date.parse(recap.lines[0].at) : null,
+    endReason: recap?.endReason ?? null,
+    startedBeforeEnded: recap ? Date.parse(recap.startedAt) < Date.parse(recap.endedAt) : null,
+    questions: (recap?.questions ?? []).map((q) => [q.turnId, q.question, q.status]),
+    terms: (recap?.terms ?? []).map((t) => t.term),
+    gaps: recap?.gaps ?? null,
+    textMatchesFile: Boolean(onDisk) && onDisk.text === recap?.text,
+  });
+
+  // 2. Invalid and unknown ids.
+  step("getErrors", {
+    unknown: code(await fake.invoke("recap:get", { id: "session-does-not-exist" })),
+    unsafe: code(await fake.invoke("recap:get", { id: "../app-preferences" })),
+    missing: code(await fake.invoke("recap:get", {})),
+    openUnknown: code(await fake.invoke("recap:open", { id: "session-does-not-exist" })),
+    deleteBad: code(await fake.invoke("recap:delete", { nope: true })),
+  });
+
+  // 3. The setting off: nothing is recorded, and old recaps stay.
+  const off = await fake.invoke("settings:set", { sessionRecap: false });
+  await liveSession(recapCallFrames());
+  const offEnd = await endAndAwaitReady(800);
+  const offList = await fake.invoke("recap:list");
+  step("settingOff", {
+    saved: off.value?.sessionRecap ?? null,
+    readyCount: offEnd.readyCount,
+    files: recapFiles().length,
+    enabled: offList.value?.enabled ?? null,
+    kept: (offList.value?.sessions ?? []).length,
+  });
+  await fake.invoke("settings:set", { sessionRecap: true });
+
+  // 4. Practice in the middle of a live call: its frames are left out, the call is kept.
+  await fake.invoke("practice:setMaterial", { problemStatement: "Design a rate limiter." });
+  await liveSession(recapCallFrames());
+  await fake.invoke("practice:open"); // practice events are delivered to the practice window only
+  const practice = await fake.invoke("practice:start"); // the session is live: practice joins it
+  await delay(100);
+  recapSeen.emit({ v: 1, type: "transcript", data: { text: "How would you shard it?", final: true, role: "prospect", source: "system", segment_id: "p1" } });
+  await waitFor(() => fake.sent.some((m) => m.channel === "practice:event" && m.payload?.type === "question"), 5000);
+  await delay(200);
+  await fake.invoke("practice:end");
+  recapSeen.emit({ v: 1, type: "transcript", data: { text: "After practice.", final: true, role: "rep", source: "mic", segment_id: "r2" } });
+  await delay(300);
+  const practiceEnd = await endAndAwaitReady();
+  const practiceRecap = await fake.invoke("recap:get", { id: practiceEnd.ready?.id ?? "none" });
+  step("practice", {
+    started: practice.ok,
+    readyCount: practiceEnd.readyCount,
+    sessionId: practiceEnd.ready?.id ?? null,
+    files: recapFiles().length,
+    transcript: (practiceRecap.value?.recap?.lines ?? []).filter((line) => line.type === "transcript").map((line) => line.text),
+    turns: (practiceRecap.value?.recap?.turns ?? []).map((turn) => turn.turnId),
+  });
+
+  // 5. A session where nothing was said is not saved.
+  await liveSession([]);
+  const silentEnd = await endAndAwaitReady(800);
+  step("silent", { readyCount: silentEnd.readyCount, files: recapFiles().length });
+
+  // 6. The recap window: opened by id (or the latest), pinned, least privilege.
+  const opened = await fake.invoke("recap:open", { id: sessionId });
+  const recapWindow = await waitFor(
+    () => fake.BrowserWindow.getAllWindows().find((win) => String(win.loaded?.path ?? "").endsWith("recap.html")) ?? null,
+    4000,
+  );
+  const { pathToFileURL } = await import("node:url");
+  const rendererDir = join(process.cwd(), "src", "desktop", "renderer");
+  const fromRecap = (channel, payload = null) => fake.invokeFrom(recapWindow?.id ?? -1, channel, payload);
+  const windowsBefore = fake.BrowserWindow.getAllWindows().length;
+  const queryId = recapWindow?.loaded?.options?.query?.id ?? null;
+  const latestOpen = await fake.invoke("recap:open", {}); // no id: the latest recap, in the same window
+  step("window", {
+    opened: opened.value ?? null,
+    title: recapWindow?.options?.title ?? null,
+    alwaysOnTop: recapWindow?.options?.alwaysOnTop ?? null,
+    queryId,
+    latestOpenId: latestOpen.value?.id ?? null,
+    queryIdAfterLatest: recapWindow?.loaded?.options?.query?.id ?? null,
+    extraWindows: fake.BrowserWindow.getAllWindows().length - windowsBefore,
+    navigateRecap: recapWindow ? navigationAllowed(recapWindow, pathToFileURL(join(rendererDir, "recap.html")).href) : null,
+    navigateIndex: recapWindow ? navigationAllowed(recapWindow, pathToFileURL(join(rendererDir, "index.html")).href) : null,
+    get: (await fromRecap("recap:get", { id: sessionId })).ok,
+    list: code(await fromRecap("recap:list")),
+    del: code(await fromRecap("recap:delete", { all: true })),
+    open: code(await fromRecap("recap:open", { id: sessionId })),
+    settings: code(await fromRecap("settings:get")),
+    session: code(await fromRecap("session:start", {})),
+  });
+
+  // 7. Delete one session, then all of them.
+  await liveSession(recapCallFrames());
+  const second = await endAndAwaitReady();
+  const beforeDelete = recapFiles().length;
+  const deletedOne = await fake.invoke("recap:delete", { id: sessionId });
+  const afterOne = await fake.invoke("recap:list");
+  const filesAfterOne = recapFiles().length;
+  const deletedAll = await fake.invoke("recap:delete", { all: true });
+  const afterAll = await fake.invoke("recap:list");
+  step("delete", {
+    secondReady: Boolean(second.ready),
+    beforeDelete,
+    one: deletedOne.value ?? null,
+    listAfterOne: (afterOne.value?.sessions ?? []).map((s) => s.id),
+    secondId: second.ready?.id ?? null,
+    filesAfterOne,
+    all: deletedAll.value ?? null,
+    listAfterAll: afterAll.value?.sessions ?? null,
+    filesAfterAll: recapFiles().length,
+  });
+
+  // 8. Quit mid-call: the recap is on disk BEFORE app.quit() runs.
+  await liveSession(recapCallFrames());
+  let atQuit = null;
+  const realQuit = fake.app.quit;
+  fake.app.quit = () => {
+    atQuit ??= recapFiles().map((name) => {
+      try {
+        const stored = JSON.parse(readFileSync(join(sessionsDir, name), "utf8"));
+        return { endReason: stored.endReason, lines: stored.lines.length };
+      } catch {
+        return { endReason: "unreadable", lines: 0 };
+      }
+    });
+    realQuit.call(fake.app);
+  };
+  const quitsBefore = fake.quitCalls.length;
+  fake.app.emit("before-quit", { preventDefault() {} });
+  await waitFor(() => fake.quitCalls.length > quitsBefore, 8000);
+  step("quit", {
+    quitCalled: fake.quitCalls.length > quitsBefore,
+    atQuit,
+  });
+  fake.app.quit = realQuit;
   try { await external?.stop?.(); } catch { /* already stopped */ }
 }
 
@@ -1281,6 +1541,15 @@ if (GROUNDING_MODES.has(mode)) {
   process.exit(0);
 }
 
+if (mode === "recap") {
+  try {
+    await runRecap(mainModule);
+  } catch (error) {
+    report.error = String(error?.stack ?? error);
+  }
+  console.log(`RESULT ${JSON.stringify(report)}`);
+  process.exit(0);
+}
 if (mode === "practice") {
   try {
     await runPractice(mainModule);

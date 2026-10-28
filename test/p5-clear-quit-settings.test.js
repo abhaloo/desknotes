@@ -113,7 +113,7 @@ test("the Answer model note names the missing key for every choice", () => {
   assert.match(body, /CEREBRAS_API_KEY was not found/);
   assert.match(body, /DEEPSEEK_API_KEY was not found, so answers use Qwen 27B thinking \(Cerebras\)/);
   assert.match(body, /DEEPSEEK_API_KEY and CEREBRAS_API_KEY were not found/);
-  assert.match(app, /renderSettings\(\{ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, keySources, repContext, highlights, answerCards, glossary \}/);
+  assert.match(app, /renderSettings\(\{ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, keySources, repContext, highlights, answerCards, glossary, sessionRecap \}/);
   const main = read("main.mjs");
   assert.match(main, /cerebrasAvailable: typeof process\.env\.CEREBRAS_API_KEY === "string"/);
   assert.match(main, /answerModel: normalizeAnswerModel\(/, "settings:get always reports a listed choice");

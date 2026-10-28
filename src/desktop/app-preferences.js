@@ -12,7 +12,8 @@
  * conversation-context.js), highlights ("Highlight key phrases",
  * src/shared/highlights.js), answer cards ("Short answer cards",
  * src/shared/answer-cards.js) and terms ("Explain terms",
- * src/server/engines/glossary.js) are on unless the file says false: a file
+ * src/server/engines/glossary.js) and session recaps ("Save a recap of each
+ * session", src/desktop/recap/) are on unless the file says false: a file
  * from an earlier build, or a damaged one, keeps the default.
  */
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
@@ -26,8 +27,8 @@ export const APP_PREFERENCES_VERSION = 1;
 export const MAX_APP_PREFERENCES_BYTES = 4 * 1024;
 export const SETTINGS_UNREADABLE = "Settings couldn't be read, so listening didn't start automatically.";
 const SETTINGS_SHAPE =
-  "settings:set takes { autoStart?: boolean, answerModel?: string, windowOpacity?: number, repContext?: boolean, highlights?: boolean, answerCards?: boolean, glossary?: boolean } with at least one of them.";
-const FIELDS = Object.freeze(["autoStart", "answerModel", "windowOpacity", "repContext", "highlights", "answerCards", "glossary"]);
+  "settings:set takes { autoStart?: boolean, answerModel?: string, windowOpacity?: number, repContext?: boolean, highlights?: boolean, answerCards?: boolean, glossary?: boolean, sessionRecap?: boolean } with at least one of them.";
+const FIELDS = Object.freeze(["autoStart", "answerModel", "windowOpacity", "repContext", "highlights", "answerCards", "glossary", "sessionRecap"]);
 
 const defaultFs = Object.freeze({ mkdir, stat, readFile, writeFile, rename, unlink });
 
@@ -46,7 +47,7 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
   const io = fs ?? defaultFs;
   const filePath = path.join(userDataDir, APP_PREFERENCES_FILENAME);
   /** Last loaded or saved values: saving one field keeps the others. */
-  let current = { autoStart: true, answerModel: DEFAULT_ANSWER_MODEL, windowOpacity: WINDOW_OPACITY.default, repContext: true, highlights: true, answerCards: true, glossary: true };
+  let current = { autoStart: true, answerModel: DEFAULT_ANSWER_MODEL, windowOpacity: WINDOW_OPACITY.default, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true };
 
   async function load() {
     const loaded = await read();
@@ -58,6 +59,7 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
       highlights: loaded.highlights,
       answerCards: loaded.answerCards,
       glossary: loaded.glossary,
+      sessionRecap: loaded.sessionRecap,
     };
     return loaded;
   }
@@ -68,7 +70,7 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
       info = await io.stat(filePath);
     } catch (error) {
       if (error?.code === "ENOENT") {
-        return { autoStart: true, answerModel: DEFAULT_ANSWER_MODEL, windowOpacity: WINDOW_OPACITY.default, repContext: true, highlights: true, answerCards: true, glossary: true, readError: null };
+        return { autoStart: true, answerModel: DEFAULT_ANSWER_MODEL, windowOpacity: WINDOW_OPACITY.default, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true, readError: null };
       }
       return unreadableSettings();
     }
@@ -84,7 +86,8 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
       const highlights = parsed.highlights !== false;
       const answerCards = parsed.answerCards !== false;
       const glossary = parsed.glossary !== false;
-      return { autoStart: parsed.autoStart, answerModel, windowOpacity, repContext, highlights, answerCards, glossary, readError: null };
+      const sessionRecap = parsed.sessionRecap !== false;
+      return { autoStart: parsed.autoStart, answerModel, windowOpacity, repContext, highlights, answerCards, glossary, sessionRecap, readError: null };
     } catch {
       return unreadableSettings();
     }
@@ -101,6 +104,7 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
       highlights: next.highlights,
       answerCards: next.answerCards,
       glossary: next.glossary,
+      sessionRecap: next.sessionRecap,
     };
     await atomicReplace(io, filePath, `${JSON.stringify(body, null, 2)}\n`);
     current = next;
@@ -112,6 +116,7 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
       highlights: next.highlights,
       answerCards: next.answerCards,
       glossary: next.glossary,
+      sessionRecap: next.sessionRecap,
       readError: null,
     };
   }
@@ -122,7 +127,8 @@ export function createAppPreferences({ userDataDir, fs } = {}) {
 /**
  * settings:set takes { autoStart?: boolean, answerModel?: a listed choice,
  * windowOpacity?: a finite number (clamped to 0.3..1), repContext?: boolean,
- * highlights?: boolean, answerCards?: boolean, glossary?: boolean }, at least one.
+ * highlights?: boolean, answerCards?: boolean, glossary?: boolean,
+ * sessionRecap?: boolean }, at least one.
  */
 export function validateSettingsUpdate(update) {
   const keys = update && typeof update === "object" && !Array.isArray(update) ? Object.keys(update) : null;
@@ -136,7 +142,8 @@ export function validateSettingsUpdate(update) {
     (!("repContext" in update) || typeof update.repContext === "boolean") &&
     (!("highlights" in update) || typeof update.highlights === "boolean") &&
     (!("answerCards" in update) || typeof update.answerCards === "boolean") &&
-    (!("glossary" in update) || typeof update.glossary === "boolean");
+    (!("glossary" in update) || typeof update.glossary === "boolean") &&
+    (!("sessionRecap" in update) || typeof update.sessionRecap === "boolean");
   if (!valid) throw new AppPreferenceError("E_INVALID_PAYLOAD", SETTINGS_SHAPE);
   const out = {};
   if ("autoStart" in update) out.autoStart = update.autoStart;
@@ -146,6 +153,7 @@ export function validateSettingsUpdate(update) {
   if ("highlights" in update) out.highlights = update.highlights;
   if ("answerCards" in update) out.answerCards = update.answerCards;
   if ("glossary" in update) out.glossary = update.glossary;
+  if ("sessionRecap" in update) out.sessionRecap = update.sessionRecap;
   return out;
 }
 
@@ -171,6 +179,7 @@ function unreadableSettings() {
     highlights: true,
     answerCards: true,
     glossary: true,
+    sessionRecap: true,
     readError: SETTINGS_UNREADABLE,
   };
 }

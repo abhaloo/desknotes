@@ -81,18 +81,18 @@ test("opening the app starts listening; the document loads, applies live, surviv
   assert.equal(steps.settings.initial.cerebrasAvailable, false, "...and no Cerebras key");
   assert.equal(steps.settings.badCode, "E_INVALID_PAYLOAD");
   assert.deepEqual(prefsOf(steps.settings.saved), { autoStart: false, answerModel: "deepseek-flash-thinking", readError: null });
-  assert.deepEqual(steps.settings.stored, { version: 1, autoStart: false, answerModel: "deepseek-flash-thinking", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true });
+  assert.deepEqual(steps.settings.stored, { version: 1, autoStart: false, answerModel: "deepseek-flash-thinking", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true });
 
   // Settings > Answer model persists beside autoStart; an invented model id is refused.
   assert.deepEqual(prefsOf(steps.answerModel.saved), { autoStart: false, answerModel: "deepseek-flash", readError: null });
   assert.equal(steps.answerModel.badCode, "E_INVALID_PAYLOAD");
-  assert.deepEqual(steps.answerModel.stored, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true });
+  assert.deepEqual(steps.answerModel.stored, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true });
 
   // Settings > "Use what I say in answers": on by default, a boolean persists, junk is refused.
   assert.equal(steps.settings.initial.repContext, true, "on by default");
   assert.equal(steps.repContext.off, false);
   assert.equal(steps.repContext.badCode, "E_INVALID_PAYLOAD");
-  assert.deepEqual(steps.repContext.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: false, highlights: true, answerCards: true, glossary: true });
+  assert.deepEqual(steps.repContext.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: false, highlights: true, answerCards: true, glossary: true, sessionRecap: true });
   assert.equal(steps.repContext.on, true);
   assert.equal(steps.repContext.settings, true);
 
@@ -100,7 +100,7 @@ test("opening the app starts listening; the document loads, applies live, surviv
   assert.equal(steps.settings.initial.highlights, true, "on by default");
   assert.equal(steps.highlights.off, false);
   assert.equal(steps.highlights.badCode, "E_INVALID_PAYLOAD");
-  assert.deepEqual(steps.highlights.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: false, answerCards: true, glossary: true });
+  assert.deepEqual(steps.highlights.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: false, answerCards: true, glossary: true, sessionRecap: true });
   assert.equal(steps.highlights.on, true);
   assert.equal(steps.highlights.settings, true);
 
@@ -108,7 +108,7 @@ test("opening the app starts listening; the document loads, applies live, surviv
   assert.equal(steps.settings.initial.answerCards, true, "on by default");
   assert.equal(steps.answerCards.off, false);
   assert.equal(steps.answerCards.badCode, "E_INVALID_PAYLOAD");
-  assert.deepEqual(steps.answerCards.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: false, glossary: true });
+  assert.deepEqual(steps.answerCards.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: false, glossary: true, sessionRecap: true });
   assert.equal(steps.answerCards.on, true);
   assert.equal(steps.answerCards.settings, true);
 
@@ -116,9 +116,17 @@ test("opening the app starts listening; the document loads, applies live, surviv
   assert.equal(steps.settings.initial.glossary, true, "on by default");
   assert.equal(steps.glossary.off, false);
   assert.equal(steps.glossary.badCode, "E_INVALID_PAYLOAD");
-  assert.deepEqual(steps.glossary.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: false });
+  assert.deepEqual(steps.glossary.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: false, sessionRecap: true });
   assert.equal(steps.glossary.on, true);
   assert.equal(steps.glossary.settings, true);
+
+  // Settings > "Save a recap of each session": on by default, a boolean persists, junk is refused.
+  assert.equal(steps.settings.initial.sessionRecap, true, "on by default");
+  assert.equal(steps.sessionRecap.off, false);
+  assert.equal(steps.sessionRecap.badCode, "E_INVALID_PAYLOAD");
+  assert.deepEqual(steps.sessionRecap.storedOff, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 1, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: false });
+  assert.equal(steps.sessionRecap.on, true);
+  assert.equal(steps.sessionRecap.settings, true);
 
   // known-terms.txt is seeded empty next to app-preferences.json; "Known terms…" opens it.
   assert.equal(steps.knownTerms.seeded, "", "created empty");
@@ -149,7 +157,7 @@ test("opening the app starts listening; the document loads, applies live, surviv
   assert.equal(steps.windowOpacity.badCode, "E_INVALID_PAYLOAD");
   assert.equal(steps.windowOpacity.settings, 0.3);
   assert.equal(steps.windowOpacity.state, 0.3);
-  assert.deepEqual(steps.windowOpacity.stored, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 0.3, repContext: true, highlights: true, answerCards: true, glossary: true });
+  assert.deepEqual(steps.windowOpacity.stored, { version: 1, autoStart: false, answerModel: "deepseek-flash", windowOpacity: 0.3, repContext: true, highlights: true, answerCards: true, glossary: true, sessionRecap: true });
 
   // The editable prompt file is seeded next to app-preferences.json with the four sections.
   assert.equal(steps.instructions.exists, true);

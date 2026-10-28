@@ -466,8 +466,8 @@ New profile; a change that reached the live session shows "Profile applies to th
 | `grounding:get` | query | none | `{ document: {name, words, chars, loadedAt, trimmedFrom?} \| null, readError: string \| null }`; `trimmedFrom` (the original length) is present only for a document saved by an earlier build over the 12,000 cap: `load()` keeps its first 12,000 characters, rewrites the file once that way, and the Settings panel shows a notice from the field until the rep loads another file or clears |
 | `grounding:load` | command | ignored: main opens the file picker and never reads a renderer path | `{ cancelled: true, document }` or `{ cancelled: false, document, applied }`; failures `E_DOC_TYPE`, `E_DOC_TOO_LARGE` (over 12,000 characters, `GROUNDING_CHARS`), `E_DOC_NOT_TEXT`, `E_DOC_EMPTY`, `E_DOC_UNREADABLE`, `E_DOC_SAVE` |
 | `grounding:clear` | command | none | `{ document: null }` |
-| `settings:get` | query | none | `{ autoStart: boolean, answerModel: "deepseek-flash-thinking" \| "deepseek-flash" \| "cerebras-qwen-thinking", answerInstructionsPath: string, deepseekAvailable: boolean, cerebrasAvailable: boolean, keySources: { DEEPSEEK_API_KEY \| CEREBRAS_API_KEY \| GROQ_API_KEY \| TYPESAFE_API_KEY: "keys.env" \| "environment" \| null }, windowOpacity: number, repContext: boolean, highlights: boolean, answerCards: boolean, glossary: boolean, knownTermsPath: string, readError: string \| null }` |
-| `settings:set` | command | `{ autoStart?: boolean, answerModel?: string, windowOpacity?: number, repContext?: boolean, highlights?: boolean, answerCards?: boolean, glossary?: boolean }`, at least one; `answerModel` must be a listed choice, `windowOpacity` a finite number (clamped to 0.3-1), `repContext`, `highlights`, `answerCards` and `glossary` booleans | the saved settings; `E_INVALID_PAYLOAD` otherwise |
+| `settings:get` | query | none | `{ autoStart: boolean, answerModel: "deepseek-flash-thinking" \| "deepseek-flash" \| "cerebras-qwen-thinking", answerInstructionsPath: string, deepseekAvailable: boolean, cerebrasAvailable: boolean, keySources: { DEEPSEEK_API_KEY \| CEREBRAS_API_KEY \| GROQ_API_KEY \| TYPESAFE_API_KEY: "keys.env" \| "environment" \| null }, windowOpacity: number, repContext: boolean, highlights: boolean, answerCards: boolean, glossary: boolean, sessionRecap: boolean, knownTermsPath: string, readError: string \| null }` |
+| `settings:set` | command | `{ autoStart?: boolean, answerModel?: string, windowOpacity?: number, repContext?: boolean, highlights?: boolean, answerCards?: boolean, glossary?: boolean, sessionRecap?: boolean }`, at least one; `answerModel` must be a listed choice, `windowOpacity` a finite number (clamped to 0.3-1), `repContext`, `highlights`, `answerCards`, `glossary` and `sessionRecap` booleans | the saved settings; `E_INVALID_PAYLOAD` otherwise |
 | `settings:openFolder` | command | none | `{ opened: true, path }` after `shell.openPath(userDataDirectory())`; `E_OPEN_FOLDER` when the shell reports an error |
 | `settings:openKnownTerms` | command | none | `{ opened: true, path }` after creating `known-terms.txt` empty when it is missing and `shell.openPath(path)`; `E_OPEN_FILE` when the shell reports an error |
 | `settings:openKeys` | command | none | `{ opened: true, path }` after writing the `keys.env` template when the file is missing and opening it (Notepad by its fixed path in the real Windows app, `shell.openPath(path)` otherwise); `E_OPEN_FILE` when it cannot be created or opened |
@@ -489,6 +489,8 @@ Rep context setting ("Use what I say in answers", Settings > Answer quality): `r
 Highlights setting ("Highlight key phrases", Settings > Answer quality; `src/shared/highlights.js`): `highlights` in `app-preferences.json`, on by default and read like `repContext` (only `false` turns it off; `createEngineFactory({ highlightsResolver })`, read for every answer; `HIGHLIGHTS=0` for a standalone server). On, the pipeline passes `highlights: true` to `streamAnswer`, the answer text carries `**` key phrases, and the answer card paints each pair as `<span class="hl">` (orange text, CSS token `--highlight`; `stream-paint.js` AnswerPainter, text nodes only, never HTML). Answer text reused as plain words (RECENT EXCHANGE history, the rep-context card comparison) has the markers stripped. Practice mode never asks for highlights. Off, prompts, filter output and frames are byte-identical to the build before the feature (test/highlights-*.test.js against values captured on 0926e36).
 
 Answer cards setting ("Short answer cards", Settings > Answer quality; `src/shared/answer-cards.js`): `answerCards` in `app-preferences.json`, on by default and read like `highlights` (only `false` turns it off; `createEngineFactory({ answerCardsResolver })`, read for every answer; `ANSWER_CARDS=0` for a standalone server). On, the pipeline passes `cards: true` to `streamAnswer`, the answerer applies the card rules and line budget, continues a card line past `CARD_LIMITS.lineWords` on an indented line at a clause break and cuts it with "…" only after `CARD_LIMITS.lineSegments` lines (`card-line-cap.js`), lets one late TRADE-OFF line through past the line budget, and the answer card paints the VERDICT headline and quiet label tags (stream-paint.js AnswerPainter). When the delivered answer is not the whole answer, `streamAnswer`'s `onCut` reports why (`lines`, `code`, `line`, `length`), `turn.done` carries it as `cut`, and the card shows "Answer cut short.". With highlights on, each card line marks the phrase that carries its own main point (one per line, `CARD_HIGHLIGHT_RULE`), instead of three per answer. Practice mode passes `cards: true` to practice answers when on. Off, prompts, filter output and frames are byte-identical to the build before the feature.
+
+Session recap setting ("Save a recap of each session", Settings > Session history; `src/desktop/recap/`): `sessionRecap` in `app-preferences.json`, on by default and read like `glossary` (only `false` turns it off). It is read once per session, when the session goes active (`createRecapRecorder({ isEnabled })`): a session that started with it on is recorded to its end. Off, no recap is recorded; the recaps already saved stay until deleted. See "Session recap" below.
 
 Terms setting ("Explain terms", Settings > Answer quality; `src/server/engines/glossary.js`, `src/desktop/renderer/terms-view.js`): `glossary` in `app-preferences.json`, on by default and read like `answerCards` (only `false` turns it off; `createEngineFactory({ glossaryResolver })`, read once per turn; `GLOSSARY=0` for a standalone server). It needs `DEEPSEEK_API_KEY`; without it nothing is explained and the Settings note says "DEEPSEEK_API_KEY was not found, so terms are not explained." `known-terms.txt` beside `app-preferences.json` (one term per line, `#` comments) is created empty at boot and by "Known terms…" (`settings:openKnownTerms`), and read again for every request. Every answer window paints the `terms` frame in `#answer-terms` under `#answer-text` (sticky at the bottom of whichever box scrolls, hidden while empty): "TERM (Full Name): what it is and does", text nodes only, no tooltips. The block shows the terms of the turn on screen only: it empties on `turn.started` and Clear, and a frame for any other turn is ignored. It is painted only from a `terms` frame through the frame scheduler; `turn.token` painting never touches it. Practice mode has no Terms.
 
@@ -729,3 +731,90 @@ path), so practice adds no network call beyond the answer stream. The
 dependency, owned by the answer-quality project (`createAnswerer` honours a
 per-call `mode`); without it the answerer ignores the field and uses the
 spoken prompt.
+
+## Session recap (additive) — `src/desktop/recap/`, `src/desktop/renderer/recap*.js`
+
+When a live session ends, its recap is saved: a timestamped timeline of both
+sides of the call, every answer and decision the model made, the questions
+the gate answered, the gaps and the terms. Mechanical: no model call. Off
+with the `sessionRecap` setting (above). Practice frames are never recorded;
+a session with nothing said and no answers is not saved.
+
+### IPC
+
+| Channel | Kind | Payload | Value |
+|---|---|---|---|
+| `recap:list` | query | none | `{ enabled: boolean, latest: summary \| null, sessions: summary[], readError: string \| null }`; `latest` is the last recap of this app run; `sessions` newest first; a damaged file is listed as `{ id, startedAt, readError }` so it can be deleted |
+| `recap:get` | query | `{ id: string }` | `{ recap }`: the saved recap with its `text`; `E_INVALID_PAYLOAD`, `E_RECAP_NOT_FOUND`, `E_RECAP_UNREADABLE` |
+| `recap:open` | command | `{ id?: string }` | `{ opened: true, id }` after opening (or switching) the recap window; without `id` the latest recap; `E_RECAP_NOT_FOUND` when there is none |
+| `recap:delete` | command | `{ id: string }` or `{ all: true }` | `{ removed: number }`; `E_INVALID_PAYLOAD` otherwise |
+| `recap:ready` | broadcast | `{ id, summary, saveError: string \| null, notes: string[] }` | sent to every app window when a session's recap is finished; `saveError` when the file could not be written (the recap stays readable in memory for the run); `notes` when the recording hit its cap or stopped early |
+
+`summary = { id, startedAt, endedAt, durationMs, endReason: "user" \| "remote" \| "quit" \| "failed", stats: { lines, prospectLines, repLines, turns, questions, answered, gaps, terms }, savedAt }`.
+
+The channels are in both `ipc-gateway.js` and the inlined tables of
+`preload.cjs`. Sender trust: the recap page (`recap.html`) may call
+`recap:get` only; listing, opening and deleting stay with the control window.
+
+### Recorder
+
+`createRecapRecorder({ lifecycle, bus, isEnabled, isPractice, sessionId, save, onSaved, log })`
+subscribes itself, once at boot, to the session lifecycle and the gateway
+bus (`speech:realtime-frame:received`, which main relays for every raw wire
+frame and stamps with the time main received it). `handleServerFrame`,
+`startSession` and `endSession` carry no recap code. A timeline opens when
+the session goes `launching -> active` (the setting is read there) and
+finishes on the terminal lifecycle state (`ended` or `failed`), never on
+`ending`, since the server still flushes finals while speech stops. Frames
+that arrive while practice is active are left out. `settled()` resolves once
+every save in flight has finished: `onBeforeQuit` ends the session itself
+(`endSession("quit")`) and awaits it, bounded by `RECAP_QUIT_TIMEOUT_MS`
+(3 s), before `app.quit()`, so the recap of a call ended by quitting is on
+disk before the process exits.
+
+### Record
+
+```js
+// recap/timeline.js — pure: frames in, one record out
+export const RECAP_RECORD_VERSION = 1, RECAP_LIMITS = { maxLines: 5000, maxLineChars: 8000 };
+export function createRecapTimeline({ id, startedAt, limits, log }) // -> { observe(frame, at), finish({ endedAt, reason }) -> record, failed() }
+//   record = { version, id, startedAt, endedAt, durationMs, endReason, truncated, dropped: { lines }, failed, lines, turns }
+//   Line = { type, at, offsetMs, ... }: one per FINAL transcript (role, source, text, segmentId,
+//   heardAt/heardOffsetMs from its first interim), and one per gate.verdict, turn.started,
+//   turn.done, turn.superseded, terms, error, error.retry, screen.result, say; turn.token is
+//   ONE line per turn (its first token). Replayed frames (a downlink seq already seen) are ignored.
+//   Turn = { turnId, question (turn.started.question), displayQuestion, intent, gateSeq, startedAt,
+//   firstTokenAt, doneAt, text (turn.done text), status: done|superseded|failed|unfinished, cut,
+//   fallback, error, terms }: joined by turn_id only, never by text.
+
+// recap/build.js — pure, no node: imports (the renderer loads it too)
+export function buildRecap(record) // -> { ...record, questions, gaps, terms, stats }
+//   questions: non-screen, non-superseded turns with a question; gaps: failed | cut | unfinished |
+//   superseded (only when no later turn finished); no silence or heuristic gaps.
+export function formatRecap(recap) // -> the readable document (saved as `text`)
+export function describeLine(line) // -> { label, text, role }: the one wording for a timeline row
+export function formatOffset(ms), formatDuration(ms), endReasonText(reason), recapNotes(recap)
+
+// recap/store.js — <userData>/sessions/<startedAt with ":" -> "-">-<id>.json, no index
+export const RECAP_DIRNAME = "sessions", RECAP_FILE_VERSION = 1, MAX_RECAP_BYTES = 8 * 1024 * 1024;
+export function createRecapStore({ userDataDir, fs, now, maxBytes })
+//   -> { save(recap) -> summary, get(id) -> { recap|null, readError }, list() -> { sessions, readError },
+//        remove(id) -> { removed: boolean }, clear() -> { removed: number } }
+//   Ids are validated (/^[A-Za-z0-9_-]{1,120}$/, E_RECAP_INVALID_ID); the cap is checked before
+//   writing (E_RECAP_TOO_LARGE) and on read; other files in the folder are never touched.
+```
+
+### Windows
+
+The recap window (`recap.html?id=...`, `DeskNotes — Session recap`) is a
+normal framed window like practice, pinned to its page, one instance that
+switches session on `recap:open`. It paints with text nodes only (model text
+is never parsed) and shows an error on its own, without empty sections. In
+the control and overlay windows a **Session recap** button appears under the
+answer when `recap:ready` arrives (or at boot, from `recap:list.latest`) and
+hides when the next session starts; a ⚠ icon beside it carries `saveError`
+and `notes` as a tooltip (a click reads it out as a toast). **Settings >
+Session history** (`renderer/recap-history.js`) lists the saved sessions
+with Open and Delete, and Delete all; deleting asks first. The list is read
+again after a delete, on `recap:ready`, when Settings opens, when the window
+regains focus while Settings is open, and when Open finds the file gone.

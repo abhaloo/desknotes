@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Same CSP as index.html: no network, no frames, no plugins, no inline code. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DeskNotes — Session recap</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-mode="recap">
+    <header class="recap-head">
+      <h1 id="recap-title" class="recap-title">Session recap</h1>
+      <p id="recap-meta" class="meta"></p>
+      <div id="recap-notes" class="recap-notes" hidden></div>
+      <p id="recap-status" class="recap-status" hidden></p>
+    </header>
+
+    <!-- Hidden until a recap painted: an error shows on its own, without empty headings under it. -->
+    <div id="recap-body" hidden>
+    <section class="recap-section" aria-label="Transcript">
+      <h2 class="card-title">Transcript</h2>
+      <div id="recap-timeline" class="recap-timeline"></div>
+    </section>
+
+    <section class="recap-section" aria-label="Questions detected">
+      <h2 class="card-title">Questions detected</h2>
+      <div id="recap-questions" class="recap-list"></div>
+    </section>
+
+    <section class="recap-section" aria-label="Gaps">
+      <h2 class="card-title">Gaps</h2>
+      <div id="recap-gaps" class="recap-list"></div>
+    </section>
+
+    <section class="recap-section" aria-label="Terms">
+      <h2 class="card-title">Terms</h2>
+      <div id="recap-terms" class="recap-list"></div>
+    </section>
+    </div>
+
+    <script type="module" src="recap.js"></script>
+  </body>
+</html>

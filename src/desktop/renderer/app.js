@@ -29,6 +29,8 @@ import { fallbackNoteText } from "./answer-fallback.js";
 import { keysStatusText } from "./keys-status.js";
 import { applyCaptureToggle } from "./capture-start.js";
 import { installSplitters } from "./layout-splitters.js";
+import { recapButtonView } from "./recap-view.js";
+import { createRecapHistory } from "./recap-history.js";
 
 const bridge = window.copilot ?? null;
 const CH = bridge?.channels ?? IPC;
@@ -110,6 +112,13 @@ const els = {
   btnOpenKnownTerms: el("btn-open-known-terms"),
   keysStatus: el("keys-status"),
   btnOpenKeys: el("btn-open-keys"),
+  // Session recaps (src/desktop/recap/): the button under the answer, and Settings > Session history.
+  btnRecap: el("btn-recap"),
+  recapProblem: el("recap-problem"),
+  sessionRecap: el("session-recap"),
+  recapHistory: el("recap-history"),
+  recapHistoryEmpty: el("recap-history-empty"),
+  recapDeleteAll: el("recap-delete-all"),
 };
 
 const answers = new AnswerBuffer();const transcripts = new TranscriptLanes();
@@ -161,6 +170,10 @@ const view = {
   // A screen capture is being read (main's SCREEN_ANALYSIS_STATE): the
   // answer badge turns orange until the reading lands.
   screenBusy: false,
+  // The latest session recap of this run (recap:list.latest, then recap:ready).
+  recapLatest: null,
+  // What went wrong with the latest recap (its save, or the recording), or "".
+  recapProblem: "",
 };
 
 /** Never stay orange if the idle broadcast is lost (the server times out well before this). */
@@ -202,7 +215,57 @@ function renderStatus() {
   for (const box of CAPTURE_BOXES) {
     if (box) box.checked = active && view.capture;
   }
+  renderRecapButton();
 }
+
+/* ------------------------------------------------------------ session recap */
+
+/** "Session recap": the latest recap, shown while no session is starting or live. */
+function renderRecapButton() {
+  const button = recapButtonView({ latest: view.recapLatest, lifecycle: view.lifecycle });
+  if (els.btnRecap) {
+    els.btnRecap.hidden = !button.visible;
+    els.btnRecap.dataset.recapId = button.id ?? "";
+  }
+  // The problem icon follows the button: a new session clears both.
+  if (els.recapProblem) {
+    const shown = button.visible && view.recapProblem !== "";
+    els.recapProblem.hidden = !shown;
+    els.recapProblem.title = shown ? view.recapProblem : "";
+  }
+}
+
+/**
+ * A session's recap is ready: saved, or kept in memory when the save failed.
+ * What went wrong (the save, a recording that stopped early or hit its cap)
+ * sits behind a small icon with a tooltip, beside the button.
+ */
+function onRecapReady(payload = {}) {
+  view.recapLatest = payload.summary ?? (typeof payload.id === "string" ? { id: payload.id } : null);
+  const notes = Array.isArray(payload.notes) ? payload.notes : [];
+  view.recapProblem = [payload.saveError, ...notes].filter((note) => typeof note === "string" && note).join(" ");
+  renderRecapButton();
+  void recapHistory?.load();
+}
+
+/** Settings > Session history (recap-history.js), control window only. */
+const recapHistory = isControl
+  ? createRecapHistory({
+      document,
+      channels: CH,
+      bridge,
+      confirm: (message) => window.confirm(message),
+      showToast,
+      els: { list: els.recapHistory, empty: els.recapHistoryEmpty, deleteAll: els.recapDeleteAll },
+      onRemoved: ({ id, all }) => {
+        if (all || view.recapLatest?.id === id) {
+          view.recapLatest = null;
+          view.recapProblem = "";
+          renderRecapButton();
+        }
+      },
+    })
+  : null;
 
 /** One incremental lane paint per animation frame, however many frames arrived. */
 function renderLane(lane) {
@@ -699,6 +762,15 @@ function wireEvents() {
   // drift from the main process (R1/R10).
   if (IPC.PANELS_CHANGED) bridge?.on(IPC.PANELS_CHANGED, renderPanels);
   bridge?.on(CH.DISPLAY_CLEARED ?? IPC.DISPLAY_CLEARED, clearDisplay);
+  bridge?.on(CH.RECAP_READY, onRecapReady);
+  els.btnRecap?.addEventListener("click", () => {
+    const id = els.btnRecap.dataset.recapId || view.recapLatest?.id;
+    if (id) void call(CH.RECAP_OPEN, { id });
+  });
+  // Keyboard and touch have no hover: a click reads the tooltip out as a toast.
+  els.recapProblem?.addEventListener("click", () => {
+    if (view.recapProblem) showToast(view.recapProblem, "error", 7000);
+  });
   bridge?.on(CH.SCREEN_ANALYSIS_STATE ?? IPC.SCREEN_ANALYSIS_STATE, (payload) => setScreenBusy(payload?.busy === true));
   els.btnClear?.addEventListener("click", () => void runShellAction("clear-display"));
 
@@ -726,6 +798,11 @@ function wireEvents() {
     // The dialog just entered the top layer above any live toast: raise the
     // toast again so feedback that arrived before the click stays readable.
     if (els.toast && !els.toast.hidden) raiseToast();
+    void recapHistory?.load(); // a recap deleted by hand, or saved by another window, shows at once
+  });
+  // Files deleted in the file manager while Settings is open: read the folder again on the way back.
+  window.addEventListener?.("focus", () => {
+    if (els.settingsDialog?.open) void recapHistory?.load();
   });
   els.btnSettingsClose?.addEventListener("click", () => els.settingsDialog?.close());
 
@@ -790,6 +867,7 @@ function wireEvents() {
     els.highlights?.addEventListener("change", onHighlightsChange);
     els.answerCards?.addEventListener("change", onAnswerCardsChange);
     els.glossary?.addEventListener("change", onGlossaryChange);
+    els.sessionRecap?.addEventListener("change", onSessionRecapChange);
     els.answerText?.addEventListener("scroll", () => {
       follow = shouldFollow(els.answerText);
     }, { passive: true });
@@ -962,7 +1040,7 @@ function renderGrounding(errorText = null) {
   if (els.groundingClear) els.groundingClear.disabled = !grounding.document;
 }
 
-function renderSettings({ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, keySources, repContext, highlights, answerCards, glossary } = {}) {
+function renderSettings({ readError = null, answerModel, answerInstructionsPath, deepseekAvailable, cerebrasAvailable, keySources, repContext, highlights, answerCards, glossary, sessionRecap } = {}) {
   if (els.settingsNote) {
     els.settingsNote.textContent = readError ?? "";
     els.settingsNote.hidden = !readError;
@@ -973,6 +1051,7 @@ function renderSettings({ readError = null, answerModel, answerInstructionsPath,
   if (els.highlights && typeof highlights === "boolean") els.highlights.checked = highlights;
   if (els.answerCards && typeof answerCards === "boolean") els.answerCards.checked = answerCards;
   if (els.glossary && typeof glossary === "boolean") els.glossary.checked = glossary;
+  if (els.sessionRecap && typeof sessionRecap === "boolean") els.sessionRecap.checked = sessionRecap;
   if (els.glossaryNote) {
     const missingKey = glossaryMissingKey({ deepseekAvailable });
     els.glossaryNote.textContent = missingKey ?? "";
@@ -1062,6 +1141,17 @@ async function onGlossaryChange() {
   if (!bridge || !els.glossary) return;
   try {
     renderSettings((await bridge.command(CH.SETTINGS_SET, { glossary: els.glossary.checked })) ?? {});
+  } catch (error) {
+    showToast(error?.message ?? "Couldn't save the setting.", "error");
+    await loadGroundingPanel();
+  }
+}
+
+/** Settings > "Save a recap of each session": saved at once, read when the next session starts. Saved recaps stay. */
+async function onSessionRecapChange() {
+  if (!bridge || !els.sessionRecap) return;
+  try {
+    renderSettings((await bridge.command(CH.SETTINGS_SET, { sessionRecap: els.sessionRecap.checked })) ?? {});
   } catch (error) {
     showToast(error?.message ?? "Couldn't save the setting.", "error");
     await loadGroundingPanel();
@@ -1297,6 +1387,20 @@ async function persistAutoStart(autoStart) {
   }
 }
 
+/** The latest recap of this run (the button) and, in the control window, the history list. */
+async function loadRecapState() {
+  if (!bridge) return;
+  try {
+    const list = (await bridge.request(CH.RECAP_LIST)) ?? {};
+    view.recapLatest = list.latest ?? null;
+    renderRecapButton();
+    recapHistory?.render(list);
+  } catch (error) {
+    renderRecapButton();
+    recapHistory?.render({ sessions: [], readError: error?.message ?? "The saved session recaps couldn't be listed." });
+  }
+}
+
 async function hydrate() {
   if (!bridge) {
     renderStatus();
@@ -1322,6 +1426,7 @@ async function hydrate() {
     // Join boundary of the say-lane handshake: main re-sends any say this
     // window has not ACKed yet (e.g. after a reload).
     void call(CH.COACH_AVATAR_READY, {}, { quiet: true });
+    await loadRecapState();
     await loadAudioDevices();
     if (isControl) await loadGroundingPanel();
   } catch (error) {

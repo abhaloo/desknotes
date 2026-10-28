@@ -57,6 +57,10 @@
             <button id="btn-screen" type="button" class="btn">Analyse screen</button>
             <!-- Clears what every window shows; listening carries on. -->
             <button id="btn-clear" type="button" class="btn" aria-label="Clear the answer, Prospect, You and screen cards in every window">Clear</button>
+            <!-- Shows when a session's recap is ready (recap:ready); hidden again when the next session starts. -->
+            <button id="btn-recap" type="button" class="btn" hidden>Session recap</button>
+            <!-- The recording or its save went wrong: the tooltip (set from recap:ready) says what; a click reads it out. -->
+            <button id="recap-problem" type="button" class="btn btn-icon recap-problem" hidden aria-label="Session recap problem">⚠</button>
           </div>
         </section>
 
@@ -277,6 +281,22 @@
                 <button id="btn-practice" type="button" class="btn">Open practice window</button>
               </div>
             </section>
+          </section>
+
+          <!-- Session recaps (src/desktop/recap/): saved when a live session ends; last, so the
+               Answer quality / Grounding order the other settings tests pin stays as it is. -->
+          <section class="settings-section" aria-label="Session history">
+            <h2 class="settings-heading">Session history</h2>
+            <label class="toggle">
+              <input id="session-recap" type="checkbox" />
+              <span>Save a recap of each session</span>
+            </label>
+            <p class="meta">When a live session ends, its transcript, the answers, the questions detected and the terms are saved in the sessions folder. Practice is never saved. Turning this off keeps the recaps already saved.</p>
+            <ul id="recap-history" class="recap-history"></ul>
+            <p id="recap-history-empty" class="meta">No saved sessions yet.</p>
+            <div class="audio-actions">
+              <button id="recap-delete-all" type="button" class="btn">Delete all…</button>
+            </div>
           </section>
         </div>
       </dialog>

@@ -90,6 +90,13 @@ const IPC = Object.freeze({
   PRACTICE_END: "practice:end",
   PRACTICE_OPEN: "practice:open",
   PRACTICE_EVENT: "practice:event",
+
+  // session recap (additive)
+  RECAP_LIST: "recap:list",
+  RECAP_GET: "recap:get",
+  RECAP_OPEN: "recap:open",
+  RECAP_DELETE: "recap:delete",
+  RECAP_READY: "recap:ready",
 });
 
 const QUERY_CHANNELS = Object.freeze([
@@ -106,6 +113,8 @@ const QUERY_CHANNELS = Object.freeze([
   IPC.PROFILES_LIST,
   IPC.SETTINGS_GET,
   IPC.PRACTICE_GET,
+  IPC.RECAP_LIST,
+  IPC.RECAP_GET,
 ]);
 
 const COMMAND_CHANNELS = Object.freeze([
@@ -145,6 +154,8 @@ const COMMAND_CHANNELS = Object.freeze([
   IPC.PRACTICE_START,
   IPC.PRACTICE_END,
   IPC.PRACTICE_OPEN,
+  IPC.RECAP_OPEN,
+  IPC.RECAP_DELETE,
 ]);
 
 const BROADCAST_CHANNELS = Object.freeze([
@@ -166,6 +177,7 @@ const BROADCAST_CHANNELS = Object.freeze([
   IPC.PRACTICE_EVENT,
   IPC.DISPLAY_CLEARED,
   IPC.SCREEN_ANALYSIS_STATE,
+  IPC.RECAP_READY,
 ]);
 
 const QUERIES = new Set(QUERY_CHANNELS);

@@ -45,6 +45,11 @@ speech to text (Groq Whisper) and answers (DeepSeek or Cerebras).
 - **Lets you rehearse.** In practice mode, DeskNotes answers each question
   after it is asked, then shows a debrief of what was covered and what was
   missed.
+- **Keeps a recap of each call.** When a session ends, a **Session recap**
+  button opens a timestamped transcript of both sides, every answer and
+  decision the model made, the questions it detected, the gaps (answers that
+  failed, were cut short or never finished) and the terms it explained.
+  **Settings > Session history** lists every saved session.
 
 ## How it stays fast
 
@@ -213,9 +218,17 @@ and answer instructions in `%APPDATA%\DeskNotes`. To use another folder, set
 `DESKNOTES_DATA_DIR` to an absolute path. **Settings > Open settings folder**
 opens it.
 
-Session logs are off by default, so DeskNotes saves no transcripts to disk.
-If you set `SESSION_TELEMETRY=1`, it writes logs with transcripts and answers
-to `logs\telemetry` in that folder and deletes them after 7 days. Set
+**Session recaps are on by default.** When a live session ends, DeskNotes
+saves its transcript, the answers and the terms as one JSON file per session
+in the `sessions` folder there, and keeps them until you delete them:
+**Settings > Session history** has Delete for each session and Delete all.
+Practice sessions and sessions where nothing was said are not saved. Turn
+**Save a recap of each session** off in Settings to stop saving new recaps;
+the ones already saved stay until you delete them.
+
+Session logs (diagnostic, event by event) are off by default. If you set
+`SESSION_TELEMETRY=1`, DeskNotes writes logs with transcripts and answers to
+`logs\telemetry` in that folder and deletes them after 7 days. Set
 `SESSION_TELEMETRY_KEEP_DAYS` to keep them longer or shorter.
 
 Audio goes only to your speech-to-text provider. Transcripts go to your

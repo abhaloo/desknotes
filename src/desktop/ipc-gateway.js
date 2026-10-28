@@ -115,6 +115,13 @@ export const IPC = Object.freeze({
   PRACTICE_END: "practice:end",
   PRACTICE_OPEN: "practice:open",
   PRACTICE_EVENT: "practice:event",
+
+  // session recap (additive): saved when a live session ends (src/desktop/recap/)
+  RECAP_LIST: "recap:list",
+  RECAP_GET: "recap:get",
+  RECAP_OPEN: "recap:open",
+  RECAP_DELETE: "recap:delete",
+  RECAP_READY: "recap:ready",
 });
 
 export const QUERY_CHANNELS = Object.freeze([
@@ -131,6 +138,8 @@ export const QUERY_CHANNELS = Object.freeze([
   IPC.PROFILES_LIST,
   IPC.SETTINGS_GET,
   IPC.PRACTICE_GET,
+  IPC.RECAP_LIST,
+  IPC.RECAP_GET,
 ]);
 
 export const COMMAND_CHANNELS = Object.freeze([
@@ -170,6 +179,8 @@ export const COMMAND_CHANNELS = Object.freeze([
   IPC.PRACTICE_START,
   IPC.PRACTICE_END,
   IPC.PRACTICE_OPEN,
+  IPC.RECAP_OPEN,
+  IPC.RECAP_DELETE,
 ]);
 
 export const BROADCAST_CHANNELS = Object.freeze([
@@ -191,6 +202,7 @@ export const BROADCAST_CHANNELS = Object.freeze([
   IPC.PRACTICE_EVENT,
   IPC.DISPLAY_CLEARED,
   IPC.SCREEN_ANALYSIS_STATE,
+  IPC.RECAP_READY,
 ]);
 
 export function okEnvelope(value = null) {

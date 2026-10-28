@@ -1207,3 +1207,96 @@ body[data-mode="practice"] {
   border-radius: 6px;
   padding: 12px;
 }
+
+/* Session recap (src/desktop/recap/): Settings > Session history in the
+   control window, and the recap window, a long scrollable document like the
+   practice page. Transcript text and model text are the user's own record. */
+.recap-history {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.recap-history-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas:
+    "title open delete"
+    "meta open delete";
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.recap-history-row:first-child { border-top: 0; }
+.recap-history-title { grid-area: title; }
+.recap-history-meta {
+  grid-area: meta;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+.recap-history-row[data-unreadable] .recap-history-meta { color: var(--bad); }
+.recap-history-row [data-action="open"] { grid-area: open; }
+.recap-history-row [data-action="delete"] { grid-area: delete; }
+.recap-problem { color: var(--warn); }
+
+body[data-mode="recap"] {
+  background: #10141c;
+  color: #e8ecf4;
+  overflow-y: auto;
+  user-select: text;
+  padding: 0 16px 24px;
+}
+.recap-head {
+  position: sticky;
+  top: 0;
+  padding: 12px 0 8px;
+  background: #10141c;
+  border-bottom: 1px solid var(--line);
+}
+.recap-title {
+  margin: 0 0 4px;
+  font-size: 1.15em;
+  font-weight: 600;
+}
+.recap-notes { margin-top: 4px; }
+.recap-note {
+  margin: 2px 0;
+  color: var(--warn);
+}
+.recap-status {
+  margin: 8px 0 0;
+  color: var(--bad);
+}
+.recap-section { margin: 16px 0; }
+.recap-timeline, .recap-list {
+  display: grid;
+  row-gap: 4px;
+}
+.recap-row, .recap-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  column-gap: 10px;
+  align-items: baseline;
+  line-height: 1.45;
+}
+.recap-item { grid-template-columns: auto 1fr; }
+.recap-offset {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.recap-label {
+  color: var(--muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+.recap-text { white-space: pre-wrap; }
+.recap-row[data-role="prospect"] .recap-label { color: var(--accent); }
+.recap-row[data-role="rep"] .recap-label { color: var(--highlight); }
+.recap-row[data-type="turn.done"] .recap-text { color: #e8ecf4; }
+.recap-row[data-type="gate.verdict"],
+.recap-row[data-type="turn.started"],
+.recap-row[data-type="turn.token"],
+.recap-row[data-type="turn.superseded"],
+.recap-row[data-type="error.retry"] { opacity: 0.7; }
+.recap-row[data-type="error"] .recap-text { color: var(--bad); }
