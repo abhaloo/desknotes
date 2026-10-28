@@ -36,6 +36,10 @@ speech to text (Groq Whisper) and answers (DeepSeek or Cerebras).
   is on your screen.
 - **Uses your own notes.** Add a reference document and your own answer
   instructions, and answers draw on them.
+- **Knows the account.** Make a customer profile from up to three files
+  (Markdown, text or a CSV export: past deals, contracts, objections) and
+  pick it before or during the call; the next answer draws on it beside your
+  reference document.
 - **Edits like text.** Every prompt is a file in `prompts/sales/`; change one
   and the next answer uses it.
 - **Lets you rehearse.** In practice mode, DeskNotes answers each question
@@ -204,9 +208,10 @@ npm run test:native-audio     # the audio addon (after build:native-audio)
 
 ## Your data
 
-DeskNotes keeps your settings, documents and answer instructions in
-`%APPDATA%\DeskNotes`. To use another folder, set `DESKNOTES_DATA_DIR` to an
-absolute path. **Settings > Open settings folder** opens it.
+DeskNotes keeps your settings, documents, customer profiles (`profiles\`)
+and answer instructions in `%APPDATA%\DeskNotes`. To use another folder, set
+`DESKNOTES_DATA_DIR` to an absolute path. **Settings > Open settings folder**
+opens it.
 
 Session logs are off by default, so DeskNotes saves no transcripts to disk.
 If you set `SESSION_TELEMETRY=1`, it writes logs with transcripts and answers

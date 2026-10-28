@@ -34,6 +34,7 @@ import {
 import { checkRealtimeUrl } from "../security/url-policy.js";
 import { createAudioDevicePreferences } from "./audio-device-preferences.js";
 import { createGroundingDocumentStore, documentMetadata, STORED_DOCUMENT_UNREADABLE } from "./grounding-document.js";
+import { createCustomerProfileStore, profileMetadata, renderProfileText } from "./customer-profiles.js";
 import { createPracticeMaterialStore } from "./practice/material.js";
 import { createPracticeDebriefStore } from "./practice-debrief.js";
 import { createQuestionSegmenter } from "./practice/segmenter.js";
@@ -166,6 +167,12 @@ const state = {
   realtimeUrlError: null,
   /** Grounding document (grounding-document.js): the text stays in main; renderers get metadata. */
   grounding: { store: null, document: null, readError: null },
+  /**
+   * Customer profiles (customer-profiles.js). The store reads the disk;
+   * sessionContext() is synchronous, so the selected profile (with its text)
+   * is cached here and refreshed by every profiles:* command.
+   */
+  customer: { store: null, selected: null, readError: null },
   /** Practice / rehearsal (src/desktop/practice/). */
   practice: {
     materialStore: null,
@@ -1783,12 +1790,11 @@ async function startSession(payload = {}) {
     if (typeof client.onStatus === "function") state.unsubscribers.push(client.onStatus(handleRealtimeStatus));
     await client.start({ sessionId, jwt: state.credential, topology: "general", captureAuthorized: true, context: sessionContext() });
     state.transport = client;
-    // start() captured the document before the link opened, and grounding:load
-    // only reaches a session once state.transport is set: a load or clear in
-    // between must still reach this session.
+    // start() captured the context before the link opened, and a push only
+    // reaches a session once state.transport is set: a document or profile
+    // change in between must still reach this session.
     const latest = sessionContext();
-    const held = client.session?.context ?? null;
-    if ((held?.docs ?? "") !== (latest?.docs ?? "") || (held?.name ?? "") !== (latest?.name ?? "")) {
+    if (!sameSessionContext(client.session?.context ?? null, latest)) {
       client.setSessionContext?.(latest);
     }
     state.sessionId = sessionId;
@@ -1969,14 +1975,36 @@ function configSnapshot() {
 
 /* --------------------------------------------- grounding + app settings */
 
-/** The realtime client's view of the document, or null. */
+/**
+ * The realtime client's view of the context: the grounding document and the
+ * selected customer profile, `{docs, name, customer: {name, docs}}`, or null
+ * when there is neither. The profile's documents go out as one text
+ * (renderProfileText); an empty profile is no customer.
+ */
 function sessionContext() {
   const doc = state.grounding.document;
-  return doc ? { docs: doc.text, name: doc.name } : null;
+  const profileText = renderProfileText(state.customer.selected);
+  if (!doc && !profileText) return null;
+  return {
+    docs: doc?.text ?? "",
+    name: doc?.name ?? "",
+    ...(profileText && { customer: { name: state.customer.selected.name, docs: profileText } }),
+  };
 }
 
-/** Push the current document into a live session. True when a session holds it now. */
-function applyGroundingToSession() {
+/** Whether two contexts (as sessionContext() builds them, or as the client holds them) carry the same text. */
+function sameSessionContext(a, b) {
+  const norm = (context) =>
+    context
+      ? [context.docs ?? "", context.name ?? "", context.customer?.name ?? "", context.customer?.docs ?? ""]
+      : ["", "", "", ""];
+  const left = norm(a);
+  const right = norm(b);
+  return left.every((value, index) => value === right[index]);
+}
+
+/** Push the current context (document and profile) into a live session. True when a session holds it now. */
+function applyContextToSession() {
   const client = state.transport;
   if (!client || typeof client.setSessionContext !== "function") return false;
   client.setSessionContext(sessionContext());
@@ -1993,6 +2021,19 @@ async function loadDesktopSettings() {
   } catch (error) {
     warn(`grounding load failed: ${errorText(error)}`);
     state.grounding.readError = STORED_DOCUMENT_UNREADABLE;
+  }
+  try {
+    // The shared budget (context-budget.js) counts the grounding document main holds now.
+    state.customer.store = createCustomerProfileStore({
+      userDataDir,
+      groundingChars: () => state.grounding.document?.text.length ?? 0,
+    });
+    state.customer.selected = await state.customer.store.selected();
+    state.customer.readError = (await state.customer.store.list()).readError;
+  } catch (error) {
+    warn(`customer profiles load failed: ${errorText(error)}`);
+    state.customer.selected = null;
+    state.customer.readError = errorText(error);
   }
   try {
     state.appPreferences = createAppPreferences({ userDataDir });
@@ -2059,7 +2100,7 @@ async function commandLoadGrounding() {
     const doc = await state.grounding.store.importFile(picked.filePaths[0]);
     state.grounding.document = doc;
     state.grounding.readError = null;
-    const applied = applyGroundingToSession();
+    const applied = applyContextToSession();
     return okEnvelope({ cancelled: false, document: documentMetadata(doc), applied });
   } catch (error) {
     return failEnvelope(error?.code ?? "E_DOC_UNREADABLE", error?.message ?? "Couldn't read this file.");
@@ -2075,8 +2116,112 @@ async function commandClearGrounding() {
   const had = Boolean(state.grounding.document);
   state.grounding.document = null;
   state.grounding.readError = null;
-  if (had) applyGroundingToSession();
+  if (had) applyContextToSession();
   return okEnvelope({ document: null });
+}
+
+/* ------------------------------------------------------ customer profiles */
+
+/** The selected profile's id, from the cache main keeps. */
+function selectedProfileId() {
+  return state.customer.selected?.id ?? null;
+}
+
+/** Refresh the cached selection from the store (after any change to it) and push it to a live session. */
+async function refreshSelectedProfile() {
+  state.customer.selected = await state.customer.store.selected();
+  return applyContextToSession();
+}
+
+function profileFailure(error, fallbackCode, fallbackMessage) {
+  return failEnvelope(error?.code ?? fallbackCode, error?.message ?? fallbackMessage);
+}
+
+async function queryProfiles() {
+  if (!state.customer.store) return { profiles: [], selectedId: null, readError: state.customer.readError };
+  try {
+    const listed = await state.customer.store.list();
+    state.customer.readError = listed.readError;
+    return listed;
+  } catch (error) {
+    return { profiles: [], selectedId: selectedProfileId(), readError: errorText(error) };
+  }
+}
+
+/** A new profile is selected at once: the panel edits the selected profile, so files can be added to it. */
+async function commandCreateProfile(payload = {}) {
+  if (!state.customer.store) return failEnvelope("E_PROFILE_SAVE", "Couldn't save the profile.");
+  try {
+    const profile = await state.customer.store.create({ name: payload?.name });
+    await state.customer.store.select(profile.id);
+    const applied = await refreshSelectedProfile();
+    return okEnvelope({ profile, selectedId: selectedProfileId(), applied });
+  } catch (error) {
+    return profileFailure(error, "E_PROFILE_SAVE", "Couldn't save the profile.");
+  }
+}
+
+async function commandSelectProfile(payload = {}) {
+  if (!state.customer.store) return failEnvelope("E_PROFILE_SAVE", "Couldn't save the selected profile.");
+  try {
+    await state.customer.store.select(payload?.id ?? null);
+    const applied = await refreshSelectedProfile();
+    return okEnvelope({ selectedId: selectedProfileId(), applied });
+  } catch (error) {
+    return profileFailure(error, "E_PROFILE_SAVE", "Couldn't save the selected profile.");
+  }
+}
+
+async function commandAddProfileDocument(payload = {}) {
+  if (!state.customer.store) return failEnvelope("E_DOC_UNREADABLE", "Couldn't read this file.");
+  const id = payload?.id;
+  // The payload names only the profile: the path comes from the picker, never from the renderer.
+  const options = {
+    title: "Add a file to the profile",
+    properties: ["openFile"],
+    filters: [{ name: "Documents", extensions: ["md", "markdown", "txt", "csv"] }],
+  };
+  const parent = state.windows.main && !state.windows.main.isDestroyed() ? state.windows.main : null;
+  let picked;
+  try {
+    picked = await dialog.showOpenDialog(...(parent ? [parent, options] : [options]));
+  } catch (error) {
+    return failEnvelope("E_DOC_UNREADABLE", `Couldn't open the file picker (${errorText(error)}).`);
+  }
+  try {
+    if (picked?.canceled || !Array.isArray(picked?.filePaths) || picked.filePaths.length === 0) {
+      return okEnvelope({ cancelled: true, profile: profileMetadata(await state.customer.store.get(id)) });
+    }
+    const profile = await state.customer.store.addDocument(id, picked.filePaths[0]);
+    const applied = profile.id === selectedProfileId() ? await refreshSelectedProfile() : false;
+    return okEnvelope({ cancelled: false, profile, applied });
+  } catch (error) {
+    return profileFailure(error, "E_DOC_UNREADABLE", "Couldn't read this file.");
+  }
+}
+
+async function commandRemoveProfileDocument(payload = {}) {
+  if (!state.customer.store) return failEnvelope("E_PROFILE_SAVE", "Couldn't save the profile.");
+  try {
+    const profile = await state.customer.store.removeDocument(payload?.id, payload?.documentId);
+    const applied = profile.id === selectedProfileId() ? await refreshSelectedProfile() : false;
+    return okEnvelope({ profile, applied });
+  } catch (error) {
+    return profileFailure(error, "E_PROFILE_SAVE", "Couldn't save the profile.");
+  }
+}
+
+/** Deleting the selected profile clears the selection; any other leaves the wire alone. */
+async function commandDeleteProfile(payload = {}) {
+  if (!state.customer.store) return failEnvelope("E_PROFILE_SAVE", "Couldn't remove the profile.");
+  try {
+    const wasSelected = payload?.id != null && payload.id === selectedProfileId();
+    const { removed } = await state.customer.store.remove(payload?.id);
+    const applied = wasSelected && removed ? await refreshSelectedProfile() : false;
+    return okEnvelope({ removed, selectedId: selectedProfileId(), applied });
+  } catch (error) {
+    return profileFailure(error, "E_PROFILE_SAVE", "Couldn't remove the profile.");
+  }
 }
 
 /**
@@ -2306,6 +2451,7 @@ function registerIpcRoutes() {
     [IPC.AUDIO_GET_CAPABILITIES]: () => queryCapabilities(),
     [IPC.AUDIO_GET_STATUS]: () => queryAudioStatus(),
     [IPC.GROUNDING_GET]: () => queryGrounding(),
+    [IPC.PROFILES_LIST]: () => queryProfiles(),
     [IPC.SETTINGS_GET]: () => querySettings(),
     [IPC.PRACTICE_GET]: () => queryPractice(),
   };
@@ -2365,6 +2511,11 @@ function registerIpcRoutes() {
     [IPC.AUDIO_EXPORT_DIAGNOSTICS]: (payload) => commandExportDiagnostics(payload),
     [IPC.GROUNDING_LOAD]: () => commandLoadGrounding(),
     [IPC.GROUNDING_CLEAR]: () => commandClearGrounding(),
+    [IPC.PROFILES_CREATE]: (payload) => commandCreateProfile(payload),
+    [IPC.PROFILES_SELECT]: (payload) => commandSelectProfile(payload),
+    [IPC.PROFILES_ADD_DOCUMENT]: (payload) => commandAddProfileDocument(payload),
+    [IPC.PROFILES_REMOVE_DOCUMENT]: (payload) => commandRemoveProfileDocument(payload),
+    [IPC.PROFILES_DELETE]: (payload) => commandDeleteProfile(payload),
     [IPC.SETTINGS_SET]: (payload) => commandSetSettings(payload),
     [IPC.SETTINGS_OPEN_FOLDER]: () => commandOpenSettingsFolder(),
     [IPC.SETTINGS_OPEN_KNOWN_TERMS]: () => commandOpenKnownTerms(),

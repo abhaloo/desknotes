@@ -177,8 +177,9 @@ export class RealtimeClient {
       jwt: session.jwt,
       topology: session.topology || "general",
       captureAuthorized: !!session.captureAuthorized,
-      // The rep's grounding document: held for the whole session and sent on
-      // every connection (the server builds a fresh engine per hello).
+      // The rep's grounding document and customer profile: held for the whole
+      // session and sent on every connection (the server builds a fresh
+      // engine per hello).
       context: normalizeContext(session.context),
       // Carried through so the 4401 refresh-then-retry grace is reachable.
       ...(typeof session.getJwt === "function" && { getJwt: session.getJwt }),
@@ -393,8 +394,11 @@ export class RealtimeClient {
   }
 
   /**
-   * Replace the grounding document mid-session (null clears it). The value
-   * is kept for the session and sent again on every reconnect.
+   * Replace the session context mid-session: the grounding document and the
+   * customer profile, `{docs, name?, customer?: {name?, docs}}` (null clears
+   * both). Every call carries the whole state, so a context without a
+   * customer drops the profile. The value is kept for the session and sent
+   * again on every reconnect.
    * @returns {boolean} whether a frame was written now
    */
   setSessionContext(context) {
@@ -411,7 +415,13 @@ export class RealtimeClient {
     const context = this.session?.context ?? null;
     if (!context && !clear) return false;
     const fields = context
-      ? { docs: context.docs, ...(context.name && { name: context.name }) }
+      ? {
+          docs: context.docs,
+          ...(context.name && { name: context.name }),
+          ...(context.customer && {
+            customer: { ...(context.customer.name && { name: context.customer.name }), docs: context.customer.docs },
+          }),
+        }
       : { docs: "" };
     return this._sendControl(makeFrame("session_context", fields));
   }
@@ -1108,11 +1118,23 @@ export class RealtimeClient {
   }
 }
 
-/** `{docs, name}` with a non-empty `docs`, or null. */
+/**
+ * `{docs, name, customer}`: the grounding document and the customer profile.
+ * A customer is `{name, docs}` with a non-empty `docs`, else null. A context
+ * with neither a document nor a customer is null.
+ */
 function normalizeContext(context) {
   if (!context || typeof context !== "object") return null;
   const docs = typeof context.docs === "string" ? context.docs : "";
+  const customer = normalizeCustomer(context.customer);
+  if (!docs && !customer) return null;
+  return { docs, name: typeof context.name === "string" ? context.name : "", customer };
+}
+
+function normalizeCustomer(customer) {
+  if (!customer || typeof customer !== "object") return null;
+  const docs = typeof customer.docs === "string" ? customer.docs : "";
   if (!docs) return null;
-  return { docs, name: typeof context.name === "string" ? context.name : "" };
+  return { name: typeof customer.name === "string" ? customer.name : "", docs };
 }
 

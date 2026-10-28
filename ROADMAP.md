@@ -18,8 +18,10 @@ Work planned for DeskNotes, roughly in order. Estimates are rough.
   prompt folder from there, instead of setting `PROMPT_SET`.
 - **Streaming speech to text (10 h).** Add a streaming provider, so a
   transcript no longer waits for a whole speech segment to upload.
-- **Account notes from a CRM export (6 h).** Load a CSV of accounts and give
-  the answer the notes for the company on the call.
+- **Customer profiles from a multi-account CRM export (4 h).** Import one
+  CSV of many accounts and pick the account's rows by a column match, instead
+  of exporting one file per customer. (Single-account profiles shipped: see
+  Settings > Customer.)
 
 ## Privacy
 

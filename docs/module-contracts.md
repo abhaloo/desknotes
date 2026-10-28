@@ -240,6 +240,18 @@ already carries are skipped. With the block, `RECENT EXCHANGE` labels its answer
 `A:`; without it, the context is exactly what it is without `conversation`. `buildContext` budgets the
 sections itself (`RESUME`/`PLAYBOOK` 4,000 chars each, `DOCUMENTS` gets the remainder of 32,000).
 
+Customer profile (`buildContext({ customer: { name, text } })`, from `onContextSet({ customer: { name, docs } })`):
+rendered as `CUSTOMER PROFILE (<name>):` (or `CUSTOMER PROFILE:` without a name) after `DOCUMENTS` and
+before the per-question tail. Closest to the question, and the grounding document changes less often than the
+profile, so a mid-call profile switch keeps the longer cached prompt prefix. Its own cap is `CUSTOMER_CHARS`
+(15,000; `src/shared/context-budget.js`), cut by whole heading sections like `DOCUMENTS` (`fitDocuments`)
+when a host sends more, and it comes out of the document's share, never the other way round. The desktop
+keeps the document at `GROUNDING_CHARS` (12,000) and the profile at `PROFILE_CHARS` (14,000), which fill
+`DOCUMENTS_CHARS` (26,000) exactly, so with every other section at its cap both render whole. `onContextSet`
+logs `pipeline.context_set { context_chars, customer_chars }`, never the text or the account name. The
+grounding rule (`prompts/sales/rules/grounding.md`) names CUSTOMER PROFILE as what the rep knows about the
+account on this call and tells the model to answer account questions from it first.
+
 Screen turns (`pipeline.js`, exports `SCREEN_CONTEXT_TTL_MS` = 10 minutes): `onScreenAnalyse` is
 stage 1 (vision interprets) and returns the vision result unchanged. When that result is `ok` with a
 non-empty `summary`, and the capture was not aborted, cleared or overtaken by a newer capture, stage 2
@@ -407,12 +419,52 @@ Electron may be unavailable: keep `session-lifecycle.js` and `ipc-gateway.js`
 PURE (no `electron` import) so they are unit-testable with `bun test`; import
 `electron` only from `main.mjs` / `preload.cjs`.
 
+### Customer profiles
+
+Store (`src/desktop/customer-profiles.js`): a named set of up to `PROFILE_MAX_DOCUMENTS` (3) documents about
+the account on the call, together at most `PROFILE_CHARS` (14,000) characters, kept as
+`<userData>/profiles/<id>.json` (id: 12 hex chars, the file name) with the selection in
+`profiles/selected.json` (`{ version: 1, selectedId }`). Same discipline as the grounding store: main owns
+the paths and the picker, documents import through `src/desktop/document-import.js` (`.md`, `.markdown`,
+`.txt`, `.csv`; UTF-8, BOM stripped, CRLF normalized, 128 KB on disk; a CSV is rendered to Markdown by
+`src/desktop/csv-document.js`, one `## <title>` section per row with `- Column: value` bullets, and every
+cap applies to that rendering), the text leaves the store only towards the session (`renderProfileText`:
+each document under a `File: <name>` line, joined by blank lines), and renderers get `profileMetadata`
+(names, kinds, chars, words, rows/columns for a CSV), never text. A file with the name of a document already
+in the profile replaces it in place. A document that would break a limit is refused, never trimmed:
+`E_PROFILE_DOCUMENTS` (3 files), `E_PROFILE_TOO_LARGE` (14,000 together), `E_PROFILE_BUDGET` (with the
+grounding document, read through the injected `groundingChars()`, over `DOCUMENTS_CHARS` 26,000; unreachable
+with a document at its own cap, a guard against an older build's file), plus the importer's `E_DOC_*`. Names:
+trimmed, 1-80 characters, one line, unique case-insensitively (`E_PROFILE_NAME`, `E_PROFILE_NAME_TAKEN`).
+A damaged profile file is skipped with `readError` (`STORED_PROFILE_UNREADABLE`); a damaged or stale
+selection reads as none.
+
+| Channel | Kind | Payload | Value |
+|---|---|---|---|
+| `profiles:list` | query | none | `{ profiles: ProfileMeta[] (by name), selectedId: string \| null, readError: string \| null }` |
+| `profiles:create` | command | `{ name }` | `{ profile, selectedId, applied }`; the new profile is selected at once (the panel edits the selected profile); `E_PROFILE_NAME`, `E_PROFILE_NAME_TAKEN` |
+| `profiles:select` | command | `{ id: string \| null }` | `{ selectedId, applied }`; `E_PROFILE_NOT_FOUND` |
+| `profiles:addDocument` | command | `{ id }`; any path in the payload is ignored: main opens the picker ("Add a file to the profile", one file, md/markdown/txt/csv) | `{ cancelled: true, profile }` or `{ cancelled: false, profile, applied }`; `E_PROFILE_NOT_FOUND`, `E_PROFILE_DOCUMENTS`, `E_PROFILE_TOO_LARGE`, `E_PROFILE_BUDGET`, `E_DOC_*` |
+| `profiles:removeDocument` | command | `{ id, documentId }` | `{ profile, applied }`; `E_PROFILE_NOT_FOUND`, `E_PROFILE_DOCUMENT_NOT_FOUND` |
+| `profiles:delete` | command | `{ id }` | `{ removed, selectedId, applied }`; deleting the selected profile clears the selection; a profile already gone is `removed: false`, not an error |
+
+`applied` is what `grounding:load` reports: true when a live session holds the new context now. Main caches
+the selected profile (`state.customer.selected`, loaded at boot and refreshed by every command above) because
+`sessionContext()` is synchronous; `sessionContext()` is `{ docs, name, customer: { name, docs } }` (the
+customer only when the selected profile has documents; null with neither a document nor a profile) and
+`applyContextToSession()` pushes it, for the grounding commands too. After `RealtimeClient.start()` the whole
+context is compared (`sameSessionContext`), so a document or profile changed while the link opened still
+reaches the session. Settings > Customer (`src/desktop/renderer/customer-view.js`, pure text helpers): a
+picker with None first, a status line ("Acme Corp · 2 files · 1,234 words"), a room line ("7,000 of 14,000
+characters · 2 of 3 files"), one line per file with Remove, Add file…, Delete profile, and a name field with
+New profile; a change that reached the live session shows "Profile applies to the next answer." once.
+
 ### Grounding document and app settings
 
 | Channel | Kind | Payload | Value |
 |---|---|---|---|
-| `grounding:get` | query | none | `{ document: {name, words, chars, loadedAt} \| null, readError: string \| null }` |
-| `grounding:load` | command | ignored: main opens the file picker and never reads a renderer path | `{ cancelled: true, document }` or `{ cancelled: false, document, applied }`; failures `E_DOC_TYPE`, `E_DOC_TOO_LARGE`, `E_DOC_NOT_TEXT`, `E_DOC_EMPTY`, `E_DOC_UNREADABLE`, `E_DOC_SAVE` |
+| `grounding:get` | query | none | `{ document: {name, words, chars, loadedAt, trimmedFrom?} \| null, readError: string \| null }`; `trimmedFrom` (the original length) is present only for a document saved by an earlier build over the 12,000 cap: `load()` keeps its first 12,000 characters, rewrites the file once that way, and the Settings panel shows a notice from the field until the rep loads another file or clears |
+| `grounding:load` | command | ignored: main opens the file picker and never reads a renderer path | `{ cancelled: true, document }` or `{ cancelled: false, document, applied }`; failures `E_DOC_TYPE`, `E_DOC_TOO_LARGE` (over 12,000 characters, `GROUNDING_CHARS`), `E_DOC_NOT_TEXT`, `E_DOC_EMPTY`, `E_DOC_UNREADABLE`, `E_DOC_SAVE` |
 | `grounding:clear` | command | none | `{ document: null }` |
 | `settings:get` | query | none | `{ autoStart: boolean, answerModel: "deepseek-flash-thinking" \| "deepseek-flash" \| "cerebras-qwen-thinking", answerInstructionsPath: string, deepseekAvailable: boolean, cerebrasAvailable: boolean, keySources: { DEEPSEEK_API_KEY \| CEREBRAS_API_KEY \| GROQ_API_KEY \| TYPESAFE_API_KEY: "keys.env" \| "environment" \| null }, windowOpacity: number, repContext: boolean, highlights: boolean, answerCards: boolean, glossary: boolean, knownTermsPath: string, readError: string \| null }` |
 | `settings:set` | command | `{ autoStart?: boolean, answerModel?: string, windowOpacity?: number, repContext?: boolean, highlights?: boolean, answerCards?: boolean, glossary?: boolean }`, at least one; `answerModel` must be a listed choice, `windowOpacity` a finite number (clamped to 0.3-1), `repContext`, `highlights`, `answerCards` and `glossary` booleans | the saved settings; `E_INVALID_PAYLOAD` otherwise |

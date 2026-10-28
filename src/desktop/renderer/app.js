@@ -22,7 +22,8 @@ import { AnswerPainter, LanePainter, createFrameScheduler } from "./stream-paint
 import { TermsPainter, TermsState } from "./terms-view.js";
 import { shouldFollow } from "./answer-scroll.js";
 import { buildDeviceSelectors, createStatusGate, presentAudioStatus } from "./audio-status.js";
-import { groundingErrorText, groundingStatusText } from "./grounding-view.js";
+import { groundingErrorText, groundingNoticeText, groundingStatusText } from "./grounding-view.js";
+import { PROFILE_APPLIED, documentLineText, profileErrorText, profileOptions, profileRoomText, profileStatusText } from "./customer-view.js";
 import { ANSWER_RETRY_TEXT, answerErrorText } from "./answer-error.js";
 import { fallbackNoteText } from "./answer-fallback.js";
 import { keysStatusText } from "./keys-status.js";
@@ -84,9 +85,18 @@ const els = {
   audioExport: el("audio-export"),
   audioOverlay: el("audio-overlay-summary"),
   groundingStatus: el("grounding-status"),
+  groundingNotice: el("grounding-notice"),
   groundingLoad: el("grounding-load"),
   groundingClear: el("grounding-clear"),
   settingsNote: el("settings-note"),
+  profileSelect: el("profile-select"),
+  profileStatus: el("profile-status"),
+  profileRoom: el("profile-room"),
+  profileFiles: el("profile-files"),
+  profileAddFile: el("profile-add-file"),
+  profileDelete: el("profile-delete"),
+  profileName: el("profile-name"),
+  profileNew: el("profile-new"),
   btnPractice: el("btn-practice"),
   answerModel: el("answer-model"),
   answerModelNote: el("answer-model-note"),
@@ -784,6 +794,14 @@ function wireEvents() {
       follow = shouldFollow(els.answerText);
     }, { passive: true });
     els.groundingClear?.addEventListener("click", onGroundingClear);
+    els.profileSelect?.addEventListener("change", onProfileSelect);
+    els.profileNew?.addEventListener("click", onProfileNew);
+    els.profileName?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") onProfileNew();
+    });
+    els.profileAddFile?.addEventListener("click", onProfileAddFile);
+    els.profileDelete?.addEventListener("click", onProfileDelete);
+    els.profileFiles?.addEventListener("click", onProfileFileRemove);
     els.btnOpenDataFolder?.addEventListener("click", onOpenDataFolder);
     els.btnOpenKnownTerms?.addEventListener("click", onOpenKnownTerms);
     els.btnOpenKeys?.addEventListener("click", onOpenKeys);
@@ -936,6 +954,11 @@ function renderGrounding(errorText = null) {
   els.groundingStatus.textContent = errorText ?? groundingStatusText(grounding);
   if (errorText) els.groundingStatus.dataset.state = "error";
   else delete els.groundingStatus.dataset.state;
+  if (els.groundingNotice) {
+    const notice = groundingNoticeText(grounding.document);
+    els.groundingNotice.textContent = notice;
+    els.groundingNotice.hidden = !notice;
+  }
   if (els.groundingClear) els.groundingClear.disabled = !grounding.document;
 }
 
@@ -1054,6 +1077,153 @@ async function loadGroundingPanel() {
     renderSettings(settings ?? {});
   } catch (error) {
     renderGrounding(groundingErrorText(error));
+  }
+  await loadProfilesPanel();
+}
+
+/* ------------------------------------------------------ customer profiles */
+
+/** Metadata only (names and counts): main never sends document text to a renderer. */
+let profiles = { profiles: [], selectedId: null, readError: null };
+
+/** The selected profile's metadata, or null. */
+function selectedProfile() {
+  return profiles.profiles.find((profile) => profile.id === profiles.selectedId) ?? null;
+}
+
+/**
+ * Paint the panel from `profiles`: the picker, the status and room lines,
+ * one line per file with a Remove button, and the buttons' enabled state.
+ * Everything is built with textContent from metadata.
+ */
+function renderProfiles(errorText = null) {
+  if (!els.profileSelect) return;
+  const selected = selectedProfile();
+  els.profileSelect.replaceChildren(
+    ...profileOptions(profiles.profiles, profiles.selectedId).map((option) => {
+      const node = document.createElement("option");
+      node.value = option.value;
+      node.textContent = option.label;
+      node.selected = option.selected;
+      return node;
+    }),
+  );
+  if (els.profileStatus) {
+    els.profileStatus.textContent = errorText ?? profileStatusText({ profile: selected, readError: profiles.readError });
+    if (errorText) els.profileStatus.dataset.state = "error";
+    else delete els.profileStatus.dataset.state;
+  }
+  if (els.profileRoom) {
+    const room = profileRoomText(selected);
+    els.profileRoom.textContent = room;
+    els.profileRoom.hidden = !room;
+  }
+  if (els.profileFiles) {
+    els.profileFiles.replaceChildren(
+      ...(selected?.documents ?? []).map((file) => {
+        const item = document.createElement("li");
+        const label = document.createElement("span");
+        label.textContent = documentLineText(file);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "btn";
+        remove.textContent = "Remove";
+        remove.dataset.documentId = file.id;
+        item.append(label, remove);
+        return item;
+      }),
+    );
+  }
+  if (els.profileAddFile) els.profileAddFile.disabled = !selected;
+  if (els.profileDelete) els.profileDelete.disabled = !selected;
+}
+
+async function loadProfilesPanel() {
+  if (!bridge) return;
+  try {
+    const listed = await bridge.request(CH.PROFILES_LIST);
+    profiles = { profiles: listed?.profiles ?? [], selectedId: listed?.selectedId ?? null, readError: listed?.readError ?? null };
+    renderProfiles();
+  } catch (error) {
+    renderProfiles(profileErrorText(error));
+  }
+}
+
+/** One toast when a change reached the live session; a change before a session needs none. */
+function noteProfileApplied(result) {
+  if (result?.applied) showToast(PROFILE_APPLIED, "info", 3000);
+}
+
+async function onProfileSelect() {
+  if (!bridge || !els.profileSelect) return;
+  const id = els.profileSelect.value || null;
+  try {
+    const result = await bridge.command(CH.PROFILES_SELECT, { id });
+    profiles = { ...profiles, selectedId: result?.selectedId ?? null };
+    renderProfiles();
+    noteProfileApplied(result);
+  } catch (error) {
+    renderProfiles(profileErrorText(error));
+  }
+}
+
+async function onProfileNew() {
+  if (!bridge || !els.profileName) return;
+  const name = els.profileName.value;
+  els.profileNew.disabled = true;
+  try {
+    const result = await bridge.command(CH.PROFILES_CREATE, { name });
+    els.profileName.value = "";
+    await loadProfilesPanel();
+    noteProfileApplied(result);
+  } catch (error) {
+    renderProfiles(profileErrorText(error));
+  } finally {
+    els.profileNew.disabled = false;
+  }
+}
+
+async function onProfileAddFile() {
+  const selected = selectedProfile();
+  if (!bridge || !els.profileAddFile || !selected) return;
+  els.profileAddFile.disabled = true;
+  try {
+    // Main opens the file picker itself; this window never names a path.
+    const result = await bridge.command(CH.PROFILES_ADD_DOCUMENT, { id: selected.id });
+    if (result && result.cancelled === false) {
+      await loadProfilesPanel();
+      noteProfileApplied(result);
+    }
+  } catch (error) {
+    renderProfiles(profileErrorText(error));
+  } finally {
+    els.profileAddFile.disabled = !selectedProfile();
+  }
+}
+
+/** A Remove button in the file list (delegated: the list is rebuilt on every render). */
+async function onProfileFileRemove(event) {
+  const button = event.target?.closest?.("button[data-document-id]");
+  const selected = selectedProfile();
+  if (!bridge || !button || !selected) return;
+  try {
+    const result = await bridge.command(CH.PROFILES_REMOVE_DOCUMENT, { id: selected.id, documentId: button.dataset.documentId });
+    await loadProfilesPanel();
+    noteProfileApplied(result);
+  } catch (error) {
+    renderProfiles(profileErrorText(error));
+  }
+}
+
+async function onProfileDelete() {
+  const selected = selectedProfile();
+  if (!bridge || !selected) return;
+  try {
+    const result = await bridge.command(CH.PROFILES_DELETE, { id: selected.id });
+    await loadProfilesPanel();
+    noteProfileApplied(result);
+  } catch (error) {
+    renderProfiles(profileErrorText(error));
   }
 }
 

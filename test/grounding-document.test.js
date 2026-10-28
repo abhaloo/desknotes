@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -71,8 +71,8 @@ test("each rejection leaves the previous document in place", () =>
     await store.importFile(good);
     const cases = [
       ["notes.pdf", Buffer.from("%PDF-1.7"), "E_DOC_TYPE", /Only \.md and \.txt files can be loaded/],
-      ["big.md", "a".repeat(MAX_DOCUMENT_CHARS + 1), "E_DOC_TOO_LARGE", /This file has 30,001 characters\. The limit is 30,000\. Trim it and load it again\./],
-      ["huge.md", "a".repeat(128 * 1024 + 1), "E_DOC_TOO_LARGE", /This file is 129 KB\. The limit is 30,000 characters\./],
+      ["big.md", "a".repeat(MAX_DOCUMENT_CHARS + 1), "E_DOC_TOO_LARGE", /This file has 12,001 characters\. The limit is 12,000\. Trim it and load it again\./],
+      ["huge.md", "a".repeat(128 * 1024 + 1), "E_DOC_TOO_LARGE", /This file is 129 KB\. The limit is 12,000 characters\./],
       ["binary.md", Buffer.from([0x48, 0x00, 0x49]), "E_DOC_NOT_TEXT", /This file isn't plain text\. Save it as \.md or \.txt and load it again\./],
       ["latin1.txt", Buffer.from([0x63, 0x61, 0x66, 0xe9]), "E_DOC_NOT_TEXT", /isn't plain text/],
       ["empty.md", " \r\n\t ", "E_DOC_EMPTY", /^This file is empty\.$/],
@@ -115,6 +115,95 @@ test("clear removes the saved file and is safe to repeat", () =>
     assert.deepEqual(await store.load(), { document: null, readError: null });
     await store.clear();
     assert.deepEqual(await readdir(userData), []);
+  }));
+
+/**
+ * An earlier build allowed 30,000 characters; the cap is now 12,000
+ * (shared/context-budget.js). A saved document over the cap is not refused:
+ * it loads cut to the first 12,000 characters, the file is rewritten once
+ * that way with `trimmedFrom`, and the notice stays until the rep loads
+ * another file or clears, so it is seen even if Settings is not opened in
+ * the session where the trim happened.
+ */
+test("a saved document over the cap loads trimmed to the cap, rewritten once, and says where it came from", () =>
+  withDirs(async ({ userData, docs }) => {
+    const file = path.join(userData, GROUNDING_FILENAME);
+    const long = `${"# Title\n\n"}${"x".repeat(30_000)}`;
+    await writeFile(file, JSON.stringify({ version: 1, name: "old.md", text: long, loadedAt: "2026-01-01T00:00:00.000Z" }));
+    const loaded = await createGroundingDocumentStore({ userDataDir: userData }).load();
+    assert.equal(loaded.readError, null);
+    assert.deepEqual(loaded.document, {
+      name: "old.md",
+      text: long.slice(0, MAX_DOCUMENT_CHARS),
+      loadedAt: "2026-01-01T00:00:00.000Z",
+      trimmedFrom: long.length,
+    });
+    const stored = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(stored.text.length, MAX_DOCUMENT_CHARS, "the file is rewritten trimmed");
+    assert.equal(stored.trimmedFrom, long.length);
+    assert.equal(stored.name, "old.md");
+    assert.equal(stored.loadedAt, "2026-01-01T00:00:00.000Z");
+    assert.equal(stored.version, 1);
+    // A later load reads the rewritten file: the same document, the notice still on.
+    const again = await createGroundingDocumentStore({ userDataDir: userData }).load();
+    assert.deepEqual(again, loaded);
+    assert.deepEqual(documentMetadata(loaded.document), {
+      name: "old.md",
+      words: 3,
+      chars: MAX_DOCUMENT_CHARS,
+      loadedAt: "2026-01-01T00:00:00.000Z",
+      trimmedFrom: long.length,
+    });
+    // Loading another file ends the notice: a fresh envelope, no trimmedFrom anywhere.
+    const store = createGroundingDocumentStore({ userDataDir: userData, now: fixedNow });
+    const fresh = path.join(docs, "new.md");
+    await writeFile(fresh, "Short.");
+    const doc = await store.importFile(fresh);
+    assert.equal("trimmedFrom" in doc, false);
+    assert.equal("trimmedFrom" in documentMetadata(doc), false);
+    assert.equal("trimmedFrom" in JSON.parse(await readFile(file, "utf8")), false);
+    assert.deepEqual((await store.load()).document, doc);
+  }));
+
+test("exactly the cap is not trimmed; a rewritten file that is within the cap keeps its notice; clear ends it", () =>
+  withDirs(async ({ userData }) => {
+    const file = path.join(userData, GROUNDING_FILENAME);
+    await writeFile(file, JSON.stringify({ version: 1, name: "max.md", text: "y".repeat(MAX_DOCUMENT_CHARS) }));
+    const exact = await createGroundingDocumentStore({ userDataDir: userData }).load();
+    assert.equal(exact.document.text.length, MAX_DOCUMENT_CHARS);
+    assert.equal("trimmedFrom" in exact.document, false);
+    assert.ok(!("trimmedFrom" in JSON.parse(await readFile(file, "utf8"))), "nothing to rewrite");
+
+    await writeFile(file, JSON.stringify({ version: 1, name: "cut.md", text: "z".repeat(100), trimmedFrom: 20_000 }));
+    const kept = await createGroundingDocumentStore({ userDataDir: userData }).load();
+    assert.equal(kept.document.trimmedFrom, 20_000);
+    // A trimmedFrom that is not a count above the cap is ignored.
+    for (const bad of ["20000", -1, 12_000, null]) {
+      await writeFile(file, JSON.stringify({ version: 1, name: "cut.md", text: "z".repeat(100), trimmedFrom: bad }));
+      assert.equal("trimmedFrom" in (await createGroundingDocumentStore({ userDataDir: userData }).load()).document, false, String(bad));
+    }
+
+    const store = createGroundingDocumentStore({ userDataDir: userData });
+    await store.clear();
+    assert.deepEqual(await store.load(), { document: null, readError: null });
+  }));
+
+test("when the trimmed file cannot be rewritten the trimmed document is still the one in use", () =>
+  withDirs(async ({ userData }) => {
+    const file = path.join(userData, GROUNDING_FILENAME);
+    const long = "x".repeat(MAX_DOCUMENT_CHARS + 5);
+    await writeFile(file, JSON.stringify({ version: 1, name: "old.md", text: long }));
+    const fs = {
+      ...(await import("node:fs/promises")),
+      writeFile: async () => {
+        throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      },
+    };
+    const loaded = await createGroundingDocumentStore({ userDataDir: userData, fs }).load();
+    assert.equal(loaded.readError, null);
+    assert.equal(loaded.document.text.length, MAX_DOCUMENT_CHARS);
+    assert.equal(loaded.document.trimmedFrom, long.length);
+    assert.equal(JSON.parse(await readFile(file, "utf8")).text.length, long.length, "the file is as it was; the next launch trims again");
   }));
 
 test("the store refuses a relative user-data directory", () => {

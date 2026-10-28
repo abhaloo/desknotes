@@ -83,16 +83,26 @@ Stream indices and hello stream descriptors (topology "general"):
   going before the hangover closed the segment. It never closes anything:
   `finalize` still marks the end of the segment, and only the final
   transcript commits a turn. Never buffered (a stale hint is worthless).
-- `session_context` — `{v, type:"session_context", docs, name?}` (additive;
-  sent only when the server advertises `session_context`). The rep's
-  grounding document: `docs` is the whole text (at most 32,000 characters;
-  `""` clears it) and `name` is the file name (cut to 200 characters). The
-  server hands it to the engine's optional `onContextSet({docs, name})`. A
-  frame before `hello`, or one whose `docs` is not a string or is too long,
-  is logged and dropped. The server builds a fresh engine for every
-  connection, so the client sends the document again after every
-  `session.state` that advertises the capability. Never buffered. Logs carry
-  its length only.
+- `session_context` — `{v, type:"session_context", docs, name?, customer?}`
+  (additive; sent only when the server advertises `session_context`). The
+  rep's grounding document and customer profile. `docs` is the document's
+  whole text (at most 32,000 characters) and `name` its file name (cut to
+  200 characters). `customer` (additive) is the selected customer profile,
+  `{name?, docs}`: `docs` is the profile's documents as one text, each under
+  a `File: <name>` line (at most 15,000 characters, the number the pipeline
+  keeps whole; `src/shared/context-budget.js` CUSTOMER_CHARS) and `name` the
+  account name (cut to 200). Every frame carries the whole state: a frame
+  without `customer` drops the profile, and `docs: ""` without a customer
+  clears both. The server hands it to the engine's optional
+  `onContextSet({docs, name, customer?})`, with the `customer` key only when
+  there is one. A frame before `hello`, or one whose `docs` is not a string
+  or is too long, is logged and dropped. A `customer` that is not an object
+  or whose `docs` is not a string or is too long is logged
+  (`bad_customer_context`, length only) and dropped on its own: the frame's
+  document still applies. An empty `customer.docs` is no customer. The
+  server builds a fresh engine for every connection, so the client sends the
+  context again after every `session.state` that advertises the capability.
+  Never buffered. Logs carry lengths only (`chars`, `customer_chars`).
 - `screen_clear` — `{v, type:"screen_clear"}` (additive; sent only when the
   server advertises `screen_clear`). Clear: the engine drops the screen
   reading it keeps for later answers (optional `onScreenClear()`), cancels a

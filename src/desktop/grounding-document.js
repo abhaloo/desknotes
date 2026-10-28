@@ -5,14 +5,23 @@
  * Main owns the file name and the directory; the renderer never supplies a
  * path. The text leaves this module only towards the realtime session; the
  * renderer gets documentMetadata() (name and counts), never the text.
+ *
+ * The cap was 30,000 characters before the customer profile shared the
+ * context budget with it (shared/context-budget.js). A saved document over
+ * the cap is not refused: load() keeps its first MAX_DOCUMENT_CHARS
+ * characters, rewrites the file once that way with `trimmedFrom` (the
+ * original length), and the renderer shows a notice from that field until
+ * the rep loads another file or clears.
  */
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { GROUNDING_CHARS } from "../shared/context-budget.js";
 import { atomicReplace } from "./atomic-file.js";
 
 export const GROUNDING_FILENAME = "grounding-document.json";
 export const GROUNDING_VERSION = 1;
-export const MAX_DOCUMENT_CHARS = 30_000;
+/** One number with the profile budget (shared/context-budget.js). */
+export const MAX_DOCUMENT_CHARS = GROUNDING_CHARS;
 export const MAX_DOCUMENT_BYTES = 128 * 1024;
 /** Text plus a short JSON envelope; anything far larger is not ours. */
 const MAX_STORED_BYTES = 512 * 1024;
@@ -48,12 +57,24 @@ export function createGroundingDocumentStore({ userDataDir, fs, now = () => new 
     if (typeof info?.size === "number" && info.size > MAX_STORED_BYTES) {
       return { document: null, readError: STORED_DOCUMENT_UNREADABLE };
     }
+    let stored;
     try {
-      const document = storedDocument(JSON.parse(await io.readFile(filePath, "utf8")));
-      return document ? { document, readError: null } : { document: null, readError: STORED_DOCUMENT_UNREADABLE };
+      stored = storedDocument(JSON.parse(await io.readFile(filePath, "utf8")));
     } catch {
       return { document: null, readError: STORED_DOCUMENT_UNREADABLE };
     }
+    if (!stored) return { document: null, readError: STORED_DOCUMENT_UNREADABLE };
+    const { trimmedNow, ...document } = stored;
+    if (trimmedNow) {
+      // Best effort: the trimmed document is in use either way, and a
+      // rewrite that fails leaves the file for the next launch to trim again.
+      try {
+        await atomicReplace(io, filePath, `${JSON.stringify({ version: GROUNDING_VERSION, ...document })}\n`);
+      } catch {
+        /* keep the trimmed document in memory */
+      }
+    }
+    return { document, readError: null };
   }
 
   async function importFile(sourcePath) {
@@ -131,14 +152,31 @@ export function documentMetadata(document) {
     words: text ? text.split(/\s+/).filter(Boolean).length : 0,
     chars: text.length,
     loadedAt: document.loadedAt ?? null,
+    ...(trimmedFrom(document.trimmedFrom) && { trimmedFrom: document.trimmedFrom }),
   };
 }
 
+/** `value` when it is a count above the cap (the only length a trim can have come from), else null. */
+function trimmedFrom(value) {
+  return Number.isInteger(value) && value > MAX_DOCUMENT_CHARS ? value : null;
+}
+
+/**
+ * The file's content as a document, or null when it is not one of ours. A
+ * text over the cap comes back cut to the cap with `trimmedFrom` and
+ * `trimmedNow` (load() then rewrites the file); a file already rewritten
+ * keeps its `trimmedFrom`.
+ */
 function storedDocument(parsed) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const { name, text, loadedAt } = parsed;
-  if (typeof name !== "string" || !name || typeof text !== "string" || !text || text.length > MAX_DOCUMENT_CHARS) return null;
-  return { name, text, loadedAt: typeof loadedAt === "string" ? loadedAt : null };
+  if (typeof name !== "string" || !name || typeof text !== "string" || !text) return null;
+  const document = { name, text, loadedAt: typeof loadedAt === "string" ? loadedAt : null };
+  if (text.length > MAX_DOCUMENT_CHARS) {
+    return { ...document, text: text.slice(0, MAX_DOCUMENT_CHARS), trimmedFrom: text.length, trimmedNow: true };
+  }
+  const earlier = trimmedFrom(parsed.trimmedFrom);
+  return earlier ? { ...document, trimmedFrom: earlier } : document;
 }
 
 function notText() {

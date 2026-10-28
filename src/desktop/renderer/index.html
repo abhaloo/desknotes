@@ -233,12 +233,38 @@
             <section id="grounding-panel" class="audio-panel grounding-panel control-only" aria-label="Grounding document">
               <h3 class="card-title">Grounding document</h3>
               <p id="grounding-status" class="meta">No document. Answers use general knowledge.</p>
+              <p id="grounding-notice" class="meta" hidden></p>
               <div class="audio-actions">
                 <button id="grounding-load" type="button" class="btn">Load…</button>
                 <button id="grounding-clear" type="button" class="btn" disabled>Clear</button>
               </div>
               <p class="audio-note">The file picker shows on a shared screen. Load your document before you share.</p>
               <p id="settings-note" class="meta" hidden></p>
+            </section>
+          </section>
+
+          <section class="settings-section" aria-label="Customer">
+            <h2 class="settings-heading">Customer</h2>
+            <section id="customer-panel" class="audio-panel customer-panel control-only" aria-label="Customer profile">
+              <h3 class="card-title">Customer profile</h3>
+              <div class="audio-field">
+                <label for="profile-select">Profile</label>
+                <select id="profile-select">
+                  <option value="">None</option>
+                </select>
+              </div>
+              <p id="profile-status" class="meta">No profile. Answers use the grounding document and general knowledge.</p>
+              <p id="profile-room" class="meta" hidden></p>
+              <ul id="profile-files" class="profile-files"></ul>
+              <div class="audio-actions">
+                <button id="profile-add-file" type="button" class="btn" disabled>Add file…</button>
+                <button id="profile-delete" type="button" class="btn" disabled>Delete profile</button>
+              </div>
+              <div class="audio-actions profile-new-row">
+                <input id="profile-name" type="text" placeholder="New profile name" maxlength="80" autocomplete="off" />
+                <button id="profile-new" type="button" class="btn">New profile</button>
+              </div>
+              <p class="audio-note">The file picker shows on a shared screen. Add files before you share.</p>
             </section>
           </section>
 

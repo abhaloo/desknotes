@@ -7,6 +7,8 @@
  *   DRIVER_MODE=embedded  default config: in-app server, default capture backend
  *   DRIVER_MODE=external  external server (REALTIME_URL/JWT), simulated capture
  *   DRIVER_MODE=practice  practice wiring: external server whose engine can emit transcript frames
+ *   DRIVER_MODE=profiles  customer profiles: the store at boot, the profiles:* channels, and the
+ *                         session_context pushes they cause (customer-profiles-main.test.js)
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { register } from "node:module";
@@ -31,7 +33,7 @@ async function waitFor(fn, timeoutMs = 8000) {
 const mode = process.env.DRIVER_MODE ?? "embedded";
 // Auto-start would start a session at boot and change every older mode's
 // expectations: only the grounding/auto-start modes leave it on.
-const GROUNDING_MODES = new Set(["grounding", "autostart-pref-off", "autostart-env-off", "autostart-fail"]);
+const GROUNDING_MODES = new Set(["grounding", "autostart-pref-off", "autostart-env-off", "autostart-fail", "profiles", "grounding-trim"]);
 if (!GROUNDING_MODES.has(mode)) process.env.COPILOT_AUTOSTART = "0";
 
 const report = { mode, node: process.versions.node, globalWebSocket: typeof globalThis.WebSocket, steps: {} };
@@ -139,7 +141,12 @@ if (GROUNDING_MODES.has(mode)) {
   groundingUserData = mkdtempSync(join(tmpdir(), "grounding-userdata-"));
   groundingDocs = mkdtempSync(join(tmpdir(), "grounding-docs-"));
   writeFileSync(join(groundingDocs, "resume.md"), "# Pat Doe\r\n\r\nLed the Acme migration in 2021.\r\n");
-  writeFileSync(join(groundingDocs, "big.md"), "a".repeat(30_001));
+  writeFileSync(join(groundingDocs, "big.md"), "a".repeat(12_001));
+  if (mode === "profiles") {
+    writeFileSync(join(groundingDocs, "notes.md"), "Prefers annual billing.\r\n");
+    writeFileSync(join(groundingDocs, "deals.csv"), "Account Name,Stage,Amount\r\nAcme Corp,Closed Won,48000\r\n");
+    writeFileSync(join(groundingDocs, "big-profile.md"), "b".repeat(14_001));
+  }
   groundingSeen = { starts: [], contexts: [] };
   const { RealtimeServer } = await import("../../src/server/ws-server.js");
   const createEngine = () => ({
@@ -170,6 +177,13 @@ if (GROUNDING_MODES.has(mode)) {
   else delete process.env.COPILOT_AUTOSTART;
   if (mode === "autostart-pref-off") {
     writeFileSync(join(groundingUserData, "app-preferences.json"), JSON.stringify({ version: 1, autoStart: false }));
+  }
+  if (mode === "grounding-trim") {
+    // A document saved by a build that allowed 30,000 characters.
+    writeFileSync(
+      join(groundingUserData, "grounding-document.json"),
+      JSON.stringify({ version: 1, name: "old.md", text: `# Old\n\n${"o".repeat(20_000)}`, loadedAt: "2026-01-01T00:00:00.000Z" }),
+    );
   }
 }
 
@@ -969,6 +983,245 @@ async function runPractice(desktop) {
   try { await external?.stop?.(); } catch { /* already stopped */ }
 }
 
+/**
+ * Customer profiles through the real main module: a profile saved by an
+ * earlier run is selected at boot and goes out with the first session; every
+ * profiles:* command answers with metadata only and pushes the whole context
+ * (grounding document plus profile) to the live session when the selection
+ * or its files change.
+ */
+async function runProfiles(desktop) {
+  const lastContext = () => groundingSeen.contexts.at(-1) ?? null;
+  const pushed = async (before) => Boolean(await waitFor(() => groundingSeen.contexts.length > before, 4000));
+  const listNames = async () => (await fake.invoke("profiles:list")).value?.profiles?.map((p) => p.name) ?? null;
+
+  // Seeded before boot, as a profile from an earlier run would be.
+  const { createCustomerProfileStore } = await import("../../src/desktop/customer-profiles.js");
+  const seed = createCustomerProfileStore({ userDataDir: groundingUserData });
+  const acme = await seed.create({ name: "Acme Corp" });
+  await seed.addDocument(acme.id, join(groundingDocs, "deals.csv"));
+  await seed.select(acme.id);
+
+  await desktop.createMainShell({ userDataDir: groundingUserData });
+  await waitFor(() => fake.ipcHandlers.has("profiles:list") && fake.BrowserWindow.getAllWindows().length > 0);
+  const started = await waitFor(() => groundingSeen.contexts.length >= 1, 8000);
+  step("bootContext", { started: Boolean(started), starts: groundingSeen.starts.length, context: groundingSeen.contexts[0] ?? null });
+
+  const listed = await fake.invoke("profiles:list");
+  step("listed", {
+    ok: listed.ok,
+    profiles: listed.value?.profiles ?? null,
+    selectedId: listed.value?.selectedId ?? null,
+    readError: listed.value?.readError ?? null,
+    acmeId: acme.id,
+    textLeaked: JSON.stringify(listed).includes("Closed Won"),
+  });
+
+  // A new profile is selected at once (so files can be added to it); empty, it clears the customer on the wire.
+  const beforeCreate = groundingSeen.contexts.length;
+  const created = await fake.invoke("profiles:create", { name: "  Globex " });
+  const createPushed = await pushed(beforeCreate);
+  step("created", {
+    ok: created.ok,
+    profile: created.value?.profile ?? null,
+    selectedId: created.value?.selectedId ?? null,
+    applied: created.value?.applied ?? null,
+    pushed: createPushed,
+    context: lastContext(),
+    listed: await listNames(),
+  });
+  const globexId = created.value?.profile?.id ?? null;
+  const blank = await fake.invoke("profiles:create", { name: "   " });
+  const taken = await fake.invoke("profiles:create", { name: "acme corp" });
+  const noPayload = await fake.invoke("profiles:create", null);
+  step("createRefused", {
+    blankCode: blank.error?.code ?? null,
+    takenCode: taken.error?.code ?? null,
+    takenMessage: taken.error?.message ?? null,
+    noPayloadCode: noPayload.error?.code ?? null,
+    listed: await listNames(),
+  });
+
+  // The picker is main's: a renderer-supplied path is ignored, a cancel changes nothing.
+  fake.setDialogResult({ canceled: true, filePaths: [] });
+  const beforeCancel = groundingSeen.contexts.length;
+  const cancelled = await fake.invoke("profiles:addDocument", { id: globexId, path: join(groundingDocs, "notes.md") });
+  await delay(100);
+  step("cancelled", {
+    ok: cancelled.ok,
+    cancelled: cancelled.value?.cancelled ?? null,
+    files: cancelled.value?.profile?.documents?.length ?? null,
+    contexts: groundingSeen.contexts.length - beforeCancel,
+  });
+
+  fake.setDialogResult({ canceled: false, filePaths: [join(groundingDocs, "notes.md")] });
+  const beforeAdd = groundingSeen.contexts.length;
+  const added = await fake.invoke("profiles:addDocument", { id: globexId });
+  const addPushed = await pushed(beforeAdd);
+  const addDialog = fake.dialogCalls.at(-1);
+  step("added", {
+    ok: added.ok,
+    profile: added.value?.profile ?? null,
+    applied: added.value?.applied ?? null,
+    pushed: addPushed,
+    textLeaked: JSON.stringify(added).includes("annual"),
+    context: lastContext(),
+    dialogHasParent: addDialog?.hasParent ?? null,
+    title: addDialog?.options?.title ?? null,
+    filters: addDialog?.options?.filters ?? null,
+    properties: addDialog?.options?.properties ?? null,
+  });
+
+  fake.setDialogResult({ canceled: false, filePaths: [join(groundingDocs, "deals.csv")] });
+  const beforeCsv = groundingSeen.contexts.length;
+  const addedCsv = await fake.invoke("profiles:addDocument", { id: globexId });
+  const csvPushed = await pushed(beforeCsv);
+  step("addedCsv", {
+    ok: addedCsv.ok,
+    documents: addedCsv.value?.profile?.documents ?? null,
+    chars: addedCsv.value?.profile?.chars ?? null,
+    pushed: csvPushed,
+    context: lastContext(),
+  });
+
+  fake.setDialogResult({ canceled: false, filePaths: [join(groundingDocs, "big-profile.md")] });
+  const beforeBig = groundingSeen.contexts.length;
+  const tooBig = await fake.invoke("profiles:addDocument", { id: globexId });
+  await delay(100);
+  const afterBig = await fake.invoke("profiles:list");
+  step("tooBig", {
+    ok: tooBig.ok,
+    code: tooBig.error?.code ?? null,
+    message: tooBig.error?.message ?? null,
+    files: afterBig.value?.profiles?.find((p) => p.id === globexId)?.documents?.length ?? null,
+    contexts: groundingSeen.contexts.length - beforeBig,
+  });
+  const unknownAdd = await fake.invoke("profiles:addDocument", { id: "000000000000" });
+  step("unknownProfile", { code: unknownAdd.error?.code ?? null });
+
+  const dealsDoc = addedCsv.value?.profile?.documents?.find((d) => d.name === "deals.csv") ?? null;
+  const beforeRemove = groundingSeen.contexts.length;
+  const removed = await fake.invoke("profiles:removeDocument", { id: globexId, documentId: dealsDoc?.id ?? null });
+  const removePushed = await pushed(beforeRemove);
+  const removedAgain = await fake.invoke("profiles:removeDocument", { id: globexId, documentId: dealsDoc?.id ?? null });
+  step("removedDocument", {
+    ok: removed.ok,
+    documents: removed.value?.profile?.documents?.map((d) => d.name) ?? null,
+    applied: removed.value?.applied ?? null,
+    pushed: removePushed,
+    context: lastContext(),
+    againCode: removedAgain.error?.code ?? null,
+  });
+
+  const beforeSelect = groundingSeen.contexts.length;
+  const selected = await fake.invoke("profiles:select", { id: acme.id });
+  const selectPushed = await pushed(beforeSelect);
+  const selectUnknown = await fake.invoke("profiles:select", { id: "000000000000" });
+  let storedSelection = null;
+  try {
+    storedSelection = JSON.parse(readFileSync(join(groundingUserData, "profiles", "selected.json"), "utf8"));
+  } catch {
+    storedSelection = null;
+  }
+  step("selected", {
+    ok: selected.ok,
+    selectedId: selected.value?.selectedId ?? null,
+    applied: selected.value?.applied ?? null,
+    pushed: selectPushed,
+    context: lastContext(),
+    stored: storedSelection,
+    unknownCode: selectUnknown.error?.code ?? null,
+    selectedAfterUnknown: (await fake.invoke("profiles:list")).value?.selectedId ?? null,
+  });
+
+  // The grounding document and the profile travel together.
+  fake.setDialogResult({ canceled: false, filePaths: [join(groundingDocs, "resume.md")] });
+  const beforeGrounding = groundingSeen.contexts.length;
+  const grounding = await fake.invoke("grounding:load");
+  const groundingPushed = await pushed(beforeGrounding);
+  step("withGrounding", { ok: grounding.ok, applied: grounding.value?.applied ?? null, pushed: groundingPushed, context: lastContext() });
+
+  await fake.invoke("session:end");
+  const beforeRestart = groundingSeen.contexts.length;
+  const restarted = await fake.invoke("session:start", {});
+  const restartPushed = await pushed(beforeRestart);
+  step("resentOnStart", { ok: restarted.ok, pushed: restartPushed, context: lastContext() });
+
+  const beforeNone = groundingSeen.contexts.length;
+  const none = await fake.invoke("profiles:select", { id: null });
+  const nonePushed = await pushed(beforeNone);
+  step("selectedNone", {
+    ok: none.ok,
+    selectedId: none.value?.selectedId ?? null,
+    applied: none.value?.applied ?? null,
+    pushed: nonePushed,
+    context: lastContext(),
+    listedSelectedId: (await fake.invoke("profiles:list")).value?.selectedId ?? null,
+  });
+
+  // Deleting a profile that is not selected changes nothing on the wire.
+  const beforeDelete = groundingSeen.contexts.length;
+  const deleted = await fake.invoke("profiles:delete", { id: globexId });
+  await delay(100);
+  step("deleted", {
+    ok: deleted.ok,
+    removed: deleted.value?.removed ?? null,
+    selectedId: deleted.value?.selectedId ?? null,
+    applied: deleted.value?.applied ?? null,
+    contexts: groundingSeen.contexts.length - beforeDelete,
+    fileGone: !existsSync(join(groundingUserData, "profiles", `${globexId}.json`)),
+    listed: await listNames(),
+    againRemoved: (await fake.invoke("profiles:delete", { id: globexId })).value?.removed ?? null,
+  });
+
+  // Deleting the selected profile clears the selection and the customer on the wire.
+  const beforeReselect = groundingSeen.contexts.length;
+  await fake.invoke("profiles:select", { id: acme.id });
+  await pushed(beforeReselect);
+  const beforeDeleteSelected = groundingSeen.contexts.length;
+  const deletedSelected = await fake.invoke("profiles:delete", { id: acme.id });
+  const deleteSelectedPushed = await pushed(beforeDeleteSelected);
+  step("deletedSelected", {
+    ok: deletedSelected.ok,
+    removed: deletedSelected.value?.removed ?? null,
+    selectedId: deletedSelected.value?.selectedId ?? null,
+    applied: deletedSelected.value?.applied ?? null,
+    pushed: deleteSelectedPushed,
+    context: lastContext(),
+    listed: await listNames(),
+    listedSelectedId: (await fake.invoke("profiles:list")).value?.selectedId ?? null,
+  });
+
+  await fake.invoke("session:end");
+  try { await external?.stop?.(); } catch { /* already stopped */ }
+}
+
+/** An over-cap saved document: trimmed at boot, sent trimmed, reported with trimmedFrom, and the file rewritten. */
+async function runGroundingTrim(desktop) {
+  await desktop.createMainShell({ userDataDir: groundingUserData });
+  await waitFor(() => fake.ipcHandlers.has("grounding:get") && fake.BrowserWindow.getAllWindows().length > 0);
+  const started = await waitFor(() => groundingSeen.contexts.length >= 1, 8000);
+  const got = await fake.invoke("grounding:get");
+  const context = groundingSeen.contexts[0] ?? null;
+  let stored = null;
+  try {
+    stored = JSON.parse(readFileSync(join(groundingUserData, "grounding-document.json"), "utf8"));
+  } catch {
+    stored = null;
+  }
+  step("trimmed", {
+    started: Boolean(started),
+    document: got.value?.document ?? null,
+    readError: got.value?.readError ?? null,
+    contextDocsLength: typeof context?.docs === "string" ? context.docs.length : null,
+    contextName: context?.name ?? null,
+    storedLength: stored?.text?.length ?? null,
+    storedTrimmedFrom: stored?.trimmedFrom ?? null,
+  });
+  await fake.invoke("session:end");
+  try { await external?.stop?.(); } catch { /* already stopped */ }
+}
+
 async function runAutostartOff(desktop) {
   await desktop.createMainShell({ userDataDir: groundingUserData });
   await waitFor(() => fake.ipcHandlers.has("settings:get"));
@@ -1017,6 +1270,8 @@ if (mode === "audio-missing") {
 if (GROUNDING_MODES.has(mode)) {
   try {
     if (mode === "grounding") await runGrounding(mainModule);
+    else if (mode === "profiles") await runProfiles(mainModule);
+    else if (mode === "grounding-trim") await runGroundingTrim(mainModule);
     else if (mode === "autostart-fail") await runAutostartFail(mainModule);
     else await runAutostartOff(mainModule);
   } catch (error) {

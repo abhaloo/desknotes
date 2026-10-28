@@ -57,7 +57,7 @@ test("opening the app starts listening; the document loads, applies live, surviv
 
   assert.equal(steps.tooBig.ok, false);
   assert.equal(steps.tooBig.code, "E_DOC_TOO_LARGE");
-  assert.match(steps.tooBig.message, /30,001 characters/);
+  assert.match(steps.tooBig.message, /12,001 characters/);
   assert.equal(steps.tooBig.kept, "resume.md");
 
   assert.equal(steps.resentOnStart.ok, true);
@@ -181,6 +181,20 @@ test("opening the app starts listening; the document loads, applies live, surviv
 function prefsOf(value) {
   return { autoStart: value?.autoStart, answerModel: value?.answerModel, readError: value?.readError };
 }
+
+test("a saved document over the new 12,000 cap is trimmed at boot, sent trimmed, and reported", { skip, timeout: 60_000 }, () => {
+  const steps = runDriver("grounding-trim");
+  const original = "# Old\n\n".length + 20_000;
+  assert.equal(steps.trimmed.started, true);
+  assert.equal(steps.trimmed.readError, null, "not refused any more");
+  assert.equal(steps.trimmed.document.name, "old.md");
+  assert.equal(steps.trimmed.document.chars, 12_000);
+  assert.equal(steps.trimmed.document.trimmedFrom, original);
+  assert.equal(steps.trimmed.contextDocsLength, 12_000, "the session gets the trimmed text");
+  assert.equal(steps.trimmed.contextName, "old.md");
+  assert.equal(steps.trimmed.storedLength, 12_000, "the file is rewritten once");
+  assert.equal(steps.trimmed.storedTrimmedFrom, original);
+});
 
 test("auto-start off in settings: nothing starts", { skip, timeout: 60_000 }, () => {
   const steps = runDriver("autostart-pref-off");

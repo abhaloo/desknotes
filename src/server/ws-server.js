@@ -31,6 +31,7 @@ import {
   makeFrame,
   parseFrame,
 } from "../shared/protocol.js";
+import { CUSTOMER_CHARS } from "../shared/context-budget.js";
 
 const OPEN = WebSocket.OPEN;
 const CLOSED = WebSocket.CLOSED;
@@ -45,9 +46,11 @@ const SERVER_CAPABILITIES = [
   CAPABILITIES.SCREEN_CLEAR,
 ];
 
-/** session_context bounds: the desktop caps documents at 30,000 characters; this is the wire guard. */
+/** session_context bounds: the desktop caps documents at 12,000 characters; this is the wire guard. */
 const MAX_SESSION_CONTEXT_CHARS = 32_000;
 const MAX_CONTEXT_NAME_CHARS = 200;
+/** `customer.docs`: the same number the pipeline keeps whole, so an accepted profile is never trimmed. */
+const MAX_CUSTOMER_CONTEXT_CHARS = CUSTOMER_CHARS;
 
 const MAX_LOGS = 200;
 
@@ -580,13 +583,18 @@ export class RealtimeServer {
           return;
         }
         const name = typeof frame.name === "string" ? frame.name.slice(0, MAX_CONTEXT_NAME_CHARS) : "";
+        // The customer profile (`customer: {name?, docs}`) is checked on its
+        // own: a bad one is dropped and logged while the document still
+        // applies, so a profile problem never takes the grounding document
+        // with it. An empty or absent customer is no customer.
+        const customer = this._customerContext(conn, frame.customer);
         try {
-          await conn.engine.onContextSet?.({ docs, name });
+          await conn.engine.onContextSet?.({ docs, name, ...(customer && { customer }) });
         } catch (error) {
           this._log({ type: "engine_error", sessionId: conn.sessionId, where: "onContextSet", message: String(error?.message ?? error) });
         }
-        // Length only: the text is the rep's private document.
-        this._log({ type: "session_context", sessionId: conn.sessionId, chars: docs.length });
+        // Lengths only: the text is the rep's private document and account notes.
+        this._log({ type: "session_context", sessionId: conn.sessionId, chars: docs.length, customer_chars: customer ? customer.docs.length : 0 });
         return;
       }
       case "screen_clear":
@@ -690,6 +698,28 @@ export class RealtimeServer {
         if (entry.seq > lastSeenSeq) this._writeRaw(conn, entry.raw);
       }
     }
+  }
+
+  /**
+   * `session_context.customer` as the engine gets it, or null: absent, null
+   * or an empty `docs` is no customer; anything else that is not
+   * `{docs: string <= MAX_CUSTOMER_CONTEXT_CHARS}` is logged (length only)
+   * and dropped.
+   */
+  _customerContext(conn, customer) {
+    if (customer === undefined || customer === null) return null;
+    const docs = customer && typeof customer === "object" && !Array.isArray(customer) ? customer.docs : undefined;
+    if (typeof docs !== "string" || docs.length > MAX_CUSTOMER_CONTEXT_CHARS) {
+      this._log({
+        type: "bad_customer_context",
+        sessionId: conn.sessionId,
+        customer_chars: typeof docs === "string" ? docs.length : null,
+      });
+      return null;
+    }
+    if (!docs) return null;
+    const name = typeof customer.name === "string" ? customer.name.slice(0, MAX_CONTEXT_NAME_CHARS) : "";
+    return { name, docs };
   }
 
   async _handleAudio(conn, bytes) {

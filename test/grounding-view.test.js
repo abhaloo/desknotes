@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NO_DOCUMENT, groundingErrorText, groundingStatusText } from "../src/desktop/renderer/grounding-view.js";
+import { NO_DOCUMENT, groundingErrorText, groundingNoticeText, groundingStatusText } from "../src/desktop/renderer/grounding-view.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -15,6 +15,22 @@ test("the status line shows the name and word count, or the no-document text", (
   assert.equal(NO_DOCUMENT, "No document. Answers use general knowledge.");
   const readError = "The saved document couldn't be read. Load it again.";
   assert.equal(groundingStatusText({ document: null, readError }), readError);
+});
+
+test("a document trimmed on load gets a notice under the status line until the rep loads another or clears", () => {
+  assert.equal(
+    groundingNoticeText({ name: "old.md", words: 2, chars: 12_000, trimmedFrom: 30_009 }),
+    "old.md had 30,009 characters, over the 12,000 limit, so it was cut to the first 12,000. Load a shorter file to choose what stays.",
+  );
+  assert.equal(groundingNoticeText({ name: "resume.md", words: 808, chars: 5_720 }), "");
+  assert.equal(groundingNoticeText(null), "");
+  const html = readFileSync(join(root, "src", "desktop", "renderer", "index.html"), "utf8");
+  assert.match(html, /<p id="grounding-notice" class="meta" hidden><\/p>/);
+  const app = readFileSync(join(root, "src", "desktop", "renderer", "app.js"), "utf8");
+  assert.match(app, /groundingNotice: el\("grounding-notice"\)/);
+  const render = /function renderGrounding\([^)]*\) \{[\s\S]*?\n\}/.exec(app)?.[0] ?? "";
+  assert.match(render, /groundingNoticeText\(grounding\.document\)/);
+  assert.match(render, /els\.groundingNotice\.hidden = !notice/);
 });
 
 test("errors show the main process's message, with a fallback", () => {

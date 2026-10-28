@@ -100,6 +100,14 @@ export const IPC = Object.freeze({
   SETTINGS_OPEN_KNOWN_TERMS: "settings:openKnownTerms", // additive: opens known-terms.txt in the default editor
   SETTINGS_OPEN_KEYS: "settings:openKeys", // additive: opens keys.env (provider keys) for editing
 
+  // customer profiles (additive): metadata only; the picker path is main's
+  PROFILES_LIST: "profiles:list",
+  PROFILES_CREATE: "profiles:create",
+  PROFILES_SELECT: "profiles:select",
+  PROFILES_ADD_DOCUMENT: "profiles:addDocument",
+  PROFILES_REMOVE_DOCUMENT: "profiles:removeDocument",
+  PROFILES_DELETE: "profiles:delete",
+
   // practice / rehearsal (additive)
   PRACTICE_GET: "practice:get",
   PRACTICE_SET_MATERIAL: "practice:setMaterial",
@@ -120,6 +128,7 @@ export const QUERY_CHANNELS = Object.freeze([
   IPC.AUDIO_GET_CAPABILITIES,
   IPC.AUDIO_GET_STATUS,
   IPC.GROUNDING_GET,
+  IPC.PROFILES_LIST,
   IPC.SETTINGS_GET,
   IPC.PRACTICE_GET,
 ]);
@@ -150,6 +159,11 @@ export const COMMAND_CHANNELS = Object.freeze([
   IPC.SETTINGS_OPEN_FOLDER,
   IPC.SETTINGS_OPEN_KNOWN_TERMS,
   IPC.SETTINGS_OPEN_KEYS,
+  IPC.PROFILES_CREATE,
+  IPC.PROFILES_SELECT,
+  IPC.PROFILES_ADD_DOCUMENT,
+  IPC.PROFILES_REMOVE_DOCUMENT,
+  IPC.PROFILES_DELETE,
   IPC.SHELL_ACTION,
   IPC.PANELS_SET,
   IPC.PRACTICE_SET_MATERIAL,

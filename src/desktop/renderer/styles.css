@@ -1108,8 +1108,65 @@ body[data-mode="control"] .overlay-only {
 
 /* Grounding panel: errors in the status line and the settings note. */
 #grounding-status[data-state="error"],
+#profile-status[data-state="error"],
 #settings-note {
   color: #f87171;
+}
+
+/* Customer panel: one line per file with its Remove button; the new-profile row is an input beside a button. */
+.profile-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-files:empty {
+  display: none;
+}
+
+.profile-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  min-width: 0;
+}
+
+.profile-files li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-files .btn {
+  width: auto;
+  flex: none;
+  padding: 2px 8px;
+}
+
+.profile-new-row {
+  flex-wrap: nowrap;
+}
+
+.profile-new-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: #12151c;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.profile-new-row .btn {
+  width: auto;
+  flex: none;
 }
 
 /* Practice / rehearsal window: an honest study surface, visually distinct.

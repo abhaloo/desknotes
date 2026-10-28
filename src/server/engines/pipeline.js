@@ -141,6 +141,7 @@
  * sent.
  */
 import { PROTOCOL_VERSION, STREAM } from "../../shared/protocol.js";
+import { CUSTOMER_CHARS } from "../../shared/context-budget.js";
 import { createAnswerer } from "./answerer.js";
 import { createAsr } from "./asr.js";
 import { createConversationLog, renderConversation } from "./conversation-context.js";
@@ -1518,17 +1519,28 @@ export function createPipelineEngine({
   }
 
   /**
-   * The rep's grounding document (`session_context`). It replaces the whole
-   * context; an empty `docs` clears it. A generation already streaming keeps
-   * the context it started with (runGeneration reads contextString once).
+   * The rep's grounding document and customer profile (`session_context`):
+   * `{docs, name, customer?: {name, docs}}`. Every call is the whole state:
+   * it replaces the context, a missing customer drops the profile, and an
+   * empty `docs` without a customer clears everything. A generation already
+   * streaming keeps the context it started with (runGeneration reads
+   * contextString once).
    */
-  function onContextSet({ docs = "", name = "" } = {}) {
+  function onContextSet({ docs = "", name = "", customer = null } = {}) {
     const text = typeof docs === "string" ? docs : "";
     const label = typeof name === "string" ? name.trim() : "";
-    // Replaces the whole context (contract: one grounding document).
-    contextParts = { docs: text ? (label ? `File: ${label}\n\n${text}` : text) : "" };
+    const profile = customerPart(customer);
+    contextParts = {
+      docs: text ? (label ? `File: ${label}\n\n${text}` : text) : "",
+      ...(profile && { customer: profile }),
+    };
     contextString = buildContext(contextParts);
-    logger({ type: "pipeline.context_set", sessionId, context_chars: contextString.length });
+    logger({
+      type: "pipeline.context_set",
+      sessionId,
+      context_chars: contextString.length,
+      customer_chars: profile ? profile.text.length : 0,
+    });
     schedulePrime();
   }
 
@@ -1885,12 +1897,20 @@ function pickContext(session) {
  * The answerer caps provider input at 32k chars and end-slices there, which
  * would cut whatever section renders last. Assembly therefore budgets here:
  * fixed caps for the other sections (resume, playbook, history, screen,
- * prospect speech), and the grounding document gets everything that remains —
- * a lone document is limited by CONTEXT_CHARS alone. A document over its share
- * loses whole sections, the least relevant to the question first
- * (fitDocuments), never the middle of one. RECENT CONVERSATION (rep context)
- * has its own fixed cap (conversation-context.js CONVERSATION_CHARS) and, like
- * every other section, comes out of the document's share.
+ * prospect speech, customer profile), and the grounding document gets
+ * everything that remains — a lone document is limited by CONTEXT_CHARS
+ * alone. A document over its share loses whole sections, the least relevant
+ * to the question first (fitDocuments), never the middle of one. RECENT
+ * CONVERSATION (rep context) has its own fixed cap (conversation-context.js
+ * CONVERSATION_CHARS) and, like every other section, comes out of the
+ * document's share.
+ *
+ * CUSTOMER PROFILE (the selected customer profile) gets at most
+ * CUSTOMER_CHARS (shared/context-budget.js), cut like the document when a
+ * host sends more. The desktop keeps the document at GROUNDING_CHARS and the
+ * profile at PROFILE_CHARS, which together fill DOCUMENTS_CHARS exactly, so
+ * with every other section at its cap both still render whole: what the rep
+ * loaded is what every answer sees.
  */
 const CONTEXT_CHARS = 32_000; // matches the answerer's MAX_CONTEXT_CHARS
 const RESUME_CHARS = 4_000;
@@ -2018,13 +2038,30 @@ function renderProspect(lines) {
   return `PROSPECT SPEECH (latest last):\n${body.slice(0, PROSPECT_CHARS)}`;
 }
 
+/** `{name, text}` for a customer profile with text, else null. */
+function customerPart(customer) {
+  if (!customer || typeof customer !== "object" || Array.isArray(customer)) return null;
+  const text = typeof customer.docs === "string" ? customer.docs : typeof customer.text === "string" ? customer.text : "";
+  if (!text.trim()) return null;
+  return { name: typeof customer.name === "string" ? customer.name.trim() : "", text };
+}
+
+/** The CUSTOMER PROFILE heading: with the account name when there is one. */
+function customerHeading(name) {
+  return name ? `CUSTOMER PROFILE (${name}):\n` : "CUSTOMER PROFILE:\n";
+}
+
 /**
- * @param {{resume?: string, playbook?: string, docs?: string, history?: {q: string, a: string}[],
+ * @param {{resume?: string, playbook?: string, docs?: string, customer?: {name?: string, text: string}|null,
+ *   history?: {q: string, a: string}[],
  *   screen?: {text: string, kind?: string, title?: string, ageMs?: number}|null,
  *   prospect?: string[]|null, conversation?: {who: string, text: string}[]|null,
  *   question?: string}} [parts]
- *   question: the question being answered, which picks the document sections
- *   kept when the document is over its share (fitDocuments).
+ *   customer: the selected customer profile, rendered after DOCUMENTS (closest
+ *   to the question; the document changes less often, so a profile switch
+ *   keeps the longer cached prefix) under its own cap, CUSTOMER_CHARS.
+ *   question: the question being answered, which picks the document and
+ *   profile sections kept when either is over its share (fitDocuments).
  *   screen: the latest interpretation (SCREEN block); prospect: recent
  *   prospect speech (screen turns only); conversation: both speakers' lines
  *   (rep context). The RECENT CONVERSATION block renders only when a REP line
@@ -2033,7 +2070,7 @@ function renderProspect(lines) {
  *   turn's PROSPECT SPEECH already carries are not repeated. Without a REP
  *   line the context is exactly what it is without `conversation`.
  */
-export function buildContext({ resume, playbook, docs, history, screen, prospect, conversation, question } = {}) {
+export function buildContext({ resume, playbook, docs, customer, history, screen, prospect, conversation, question } = {}) {
   const text = (value) => (typeof value === "string" ? value : "");
   const head = [
     text(resume) && `RESUME:\n${text(resume).slice(0, RESUME_CHARS)}`,
@@ -2048,12 +2085,22 @@ export function buildContext({ resume, playbook, docs, history, screen, prospect
   if (historyText) tail.push(`RECENT EXCHANGE:\n${historyText}`);
   const prospectText = renderProspect(prospect);
   if (prospectText) tail.push(prospectText);
-  // Budget for DOCUMENTS: total minus every other section, its own heading and
-  // the "\n\n" separators it will sit between.
-  const separators = (head.length ? 2 : 0) + (tail.length ? 2 : 0);
-  const usedElsewhere = head.join("\n\n").length + tail.join("\n\n").length + separators + "DOCUMENTS:\n".length;
+  // CUSTOMER PROFILE first, under its own cap (and never more than what the
+  // other sections leave), so a profile can never starve the document.
+  const profile = customerPart(customer);
+  const fixed = head.join("\n\n").length + tail.join("\n\n").length + (head.length ? 2 : 0) + (tail.length ? 2 : 0);
+  let customerText = "";
+  if (profile) {
+    const heading = customerHeading(profile.name);
+    const room = Math.max(0, CONTEXT_CHARS - fixed - heading.length - 2);
+    customerText = fitDocuments(profile.text, Math.min(CUSTOMER_CHARS, room), question);
+    if (customerText) customerText = heading + customerText;
+  }
+  // Budget for DOCUMENTS: total minus every other section (the profile
+  // included), its own heading and the "\n\n" separators it will sit between.
+  const usedElsewhere = fixed + (customerText ? customerText.length + 2 : 0) + "DOCUMENTS:\n".length;
   const docsText = fitDocuments(text(docs), Math.max(0, CONTEXT_CHARS - usedElsewhere), question);
-  return [...head, docsText && `DOCUMENTS:\n${docsText}`, ...tail].filter(Boolean).join("\n\n");
+  return [...head, docsText && `DOCUMENTS:\n${docsText}`, customerText, ...tail].filter(Boolean).join("\n\n");
 }
 
 /**
