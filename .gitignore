@@ -10,3 +10,8 @@ graphify-out/
 .env.*
 .delegate/
 !.env.example
+venv/
+.venv/
+__pycache__/
+build/
+coverage/

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAnswerer } from "../src/server/engines/answerer.js";
 import { buildEngineConfig } from "../src/server/engines/config.js";
-import { createSelectableAnswerer } from "../src/server/engines/index.js";
+import { createEngineFactory, createSelectableAnswerer } from "../src/server/engines/index.js";
 import { createPipelineEngine } from "../src/server/engines/pipeline.js";
 import { createVisionEngine } from "../src/server/engines/vision.js";
 
@@ -24,6 +24,7 @@ const CEREBRAS_OPTIONS = Object.freeze({
   reasoningEffort: "high",
 });
 const NO_MODEL = Object.freeze({ provider: "unconfigured", model: "mock" });
+const CUSTOM_OPTIONS = Object.freeze({ provider: "openai-compatible", baseUrl: "https://llm.test/v1", apiKey: "custom-key-0123456789", model: "custom-7b" });
 
 /** Answers every chat request with one SSE delta, or refuses one origin with `status`. */
 function chat({ refuseOrigin = null, status = 402 } = {}) {
@@ -45,13 +46,16 @@ function chat({ refuseOrigin = null, status = 402 } = {}) {
   return { calls, restore: () => (globalThis.fetch = realFetch) };
 }
 
-/** Streams one answer and returns its text with every onFallback report. */
-async function answer(answerer, question = "what is a worker thread") {
+/** Streams one answer and returns its text with every onFallback report. `extra`: more streamAnswer arguments. */
+async function answer(answerer, question = "what is a worker thread", extra = {}) {
   const notes = [];
   let text = "";
-  for await (const delta of answerer.streamAnswer({ question, onFallback: (note) => notes.push(note) })) text += delta;
+  for await (const delta of answerer.streamAnswer({ question, onFallback: (note) => notes.push(note), ...extra })) text += delta;
   return { text, notes };
 }
+
+/** The pipeline's last retry: answer on the stand-in engine. */
+const STAND_IN = Object.freeze({ retryOf: "stalled", standIn: true });
 
 /* ------------------------------------------------------------ live mode -- */
 
@@ -295,6 +299,200 @@ test("a pause belongs to the refused engine: another Settings choice answers at 
     assert.deepEqual(notes, []);
   } finally {
     fetches.restore();
+  }
+});
+
+/* --------------------------------------------------------------- ladder -- */
+
+/**
+ * The pipeline's last retry asks for a stand-in (`streamAnswer({standIn:
+ * true})`). The engines with a key form a ladder, fastest first: Cerebras
+ * Qwen (CEREBRAS_API_KEY), DeepSeek Flash with thinking (DEEPSEEK_API_KEY),
+ * then a configured LLM_* engine on any other origin; the chosen engine's
+ * origin is never on its own ladder, and a paused rung is skipped. A refusal
+ * replays on the same ladder. Nothing is paused after a stall: the next
+ * answer goes to the chosen engine again.
+ */
+
+test("a stand-in for the DeepSeek choice is Qwen, reported as a stall fallback", async () => {
+  const fetches = chat();
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "deepseek-flash-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+    });
+    const { text, notes } = await answer(answerer, "q", STAND_IN);
+    assert.match(text, /ok/);
+    assert.deepEqual(fetches.calls, ["https://api.cerebras.ai/v1/chat/completions"]);
+    assert.deepEqual(notes, [{ to: "Qwen 27B", from: "DeepSeek Flash", reason: "stalled" }]);
+  } finally {
+    fetches.restore();
+  }
+});
+
+test("a stand-in for the Qwen choice is DeepSeek", async () => {
+  const fetches = chat();
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "cerebras-qwen-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+    });
+    const { text, notes } = await answer(answerer, "q", STAND_IN);
+    assert.match(text, /ok/);
+    assert.deepEqual(fetches.calls, ["https://api.deepseek.com/chat/completions"]);
+    assert.deepEqual(notes, [{ to: "DeepSeek Flash", from: "Qwen 27B", reason: "stalled" }]);
+  } finally {
+    fetches.restore();
+  }
+});
+
+test("the chosen engine's origin is never its own stand-in: with one key the chosen engine answers again, with no note", async () => {
+  // DeepSeek Flash (fast) must not fall back to DeepSeek Flash thinking: the
+  // same provider is the one that stalled.
+  const fetches = chat();
+  try {
+    const answerer = createSelectableAnswerer({
+      options: NO_MODEL,
+      selectModel: () => "deepseek-flash",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: false,
+    });
+    const { text, notes } = await answer(answerer, "q", STAND_IN);
+    assert.match(text, /ok/);
+    assert.deepEqual(fetches.calls, ["https://api.deepseek.com/chat/completions"]);
+    assert.deepEqual(notes, []);
+  } finally {
+    fetches.restore();
+  }
+});
+
+test("a configured engine and both vendor keys: the ladder is Cerebras, then DeepSeek, then the configured engine", async () => {
+  // LLM_* names a custom engine; CEREBRAS_API_KEY is set too. The DeepSeek
+  // choice stands in on Cerebras first (the fastest), and on the custom
+  // engine once Cerebras is paused by a refusal.
+  let fetches = chat();
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CUSTOM_OPTIONS,
+      selectModel: () => "deepseek-flash-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasApiKey: CEREBRAS_KEY,
+    });
+    const first = await answer(answerer, "q", STAND_IN);
+    assert.deepEqual(fetches.calls, ["https://api.cerebras.ai/v1/chat/completions"]);
+    assert.deepEqual(first.notes, [{ to: "Qwen 27B", from: "DeepSeek Flash", reason: "stalled" }]);
+    fetches.restore();
+
+    fetches = chat({ refuseOrigin: "https://api.cerebras.ai", status: 402 });
+    const second = await answer(answerer, "q", STAND_IN);
+    assert.match(second.text, /ok/);
+    assert.deepEqual(fetches.calls, ["https://api.cerebras.ai/v1/chat/completions", "https://llm.test/v1/chat/completions"], "the refusal replays on the next rung");
+    assert.deepEqual(second.notes.at(-1), { to: "custom-7b", from: "Qwen 27B", reason: "out_of_credit" });
+    fetches.calls.length = 0;
+
+    const third = await answer(answerer, "q", STAND_IN);
+    assert.deepEqual(fetches.calls, ["https://llm.test/v1/chat/completions"], "the paused rung is skipped");
+    assert.deepEqual(third.notes, [{ to: "custom-7b", from: "DeepSeek Flash", reason: "stalled" }]);
+  } finally {
+    fetches.restore();
+  }
+});
+
+test("a refusal on DeepSeek replays on the next rung instead of failing", async () => {
+  const fetches = chat({ refuseOrigin: "https://api.deepseek.com", status: 402 });
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "deepseek-flash-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+    });
+    const { text, notes } = await answer(answerer);
+    assert.match(text, /ok/);
+    assert.deepEqual(fetches.calls, ["https://api.deepseek.com/chat/completions", "https://api.cerebras.ai/v1/chat/completions"]);
+    assert.deepEqual(notes, [{ to: "Qwen 27B", from: "DeepSeek Flash", reason: "out_of_credit" }]);
+  } finally {
+    fetches.restore();
+  }
+});
+
+test("nothing is paused after a stand-in answer: the next answer goes to the chosen engine", async () => {
+  const fetches = chat();
+  try {
+    const answerer = createSelectableAnswerer({
+      options: CEREBRAS_OPTIONS,
+      selectModel: () => "deepseek-flash-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: true,
+    });
+    await answer(answerer, "q", STAND_IN);
+    fetches.calls.length = 0;
+    const { notes } = await answer(answerer);
+    assert.deepEqual(fetches.calls, ["https://api.deepseek.com/chat/completions"]);
+    assert.deepEqual(notes, []);
+  } finally {
+    fetches.restore();
+  }
+});
+
+test("the Cerebras key reaches the ladder from the environment", () => {
+  assert.equal(buildEngineConfig({ CEREBRAS_API_KEY: CEREBRAS_KEY }).cerebrasApiKey, CEREBRAS_KEY);
+  assert.equal(buildEngineConfig({}).cerebrasApiKey, null);
+  assert.equal(buildEngineConfig({ CEREBRAS_API_KEY: "" }).cerebrasApiKey, null);
+});
+
+test("end to end: a DeepSeek answer that stalls twice is answered by the custom engine, and turn.done says so", async () => {
+  // The factory wires the keys into the ladder (no Cerebras key here, so the
+  // configured engine is the only rung). DeepSeek accepts each request and
+  // never sends a byte; the stall budget is short for the test.
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) => {
+    calls.push(String(url));
+    if (String(url).startsWith("https://api.deepseek.com")) {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    }
+    return Promise.resolve(
+      new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: "Custom answers." } }] })}\n\ndata: [DONE]\n\n`, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+  };
+  const frames = [];
+  try {
+    const factory = createEngineFactory({
+      asrOptions: { provider: "mock-scripted", script: { 1: ["How do I start a live session today?"] } },
+      answerProvider: "openai-compatible",
+      answererOptions: { ...CUSTOM_OPTIONS, stallMs: 120, spokenFilter: false },
+      answerModel: "deepseek-flash-thinking",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasApiKey: null,
+    });
+    const engine = factory({ emit: (frame) => frames.push(frame), log: () => {} });
+    engine.onSessionStart({ sessionId: "ladder" });
+    const chunk = new Int16Array(4800).fill(9000);
+    for (let i = 0; i < 12; i += 1) engine.onAudio({ streamIdx: 1, seq: i, pcm16: chunk });
+    engine.onFinalize({ streamIdx: 1 });
+    const done = await waitFor(() => frames.find((frame) => frame.type === "turn.done"), "turn.done");
+    engine.dispose();
+    assert.equal(done.data.text, "Custom answers.");
+    assert.deepEqual(done.data.fallback, { to: "custom-7b", from: "DeepSeek Flash", reason: "stalled" });
+    assert.deepEqual(calls, [
+      "https://api.deepseek.com/chat/completions",
+      "https://api.deepseek.com/chat/completions",
+      "https://llm.test/v1/chat/completions",
+    ]);
+    assert.deepEqual(frames.filter((frame) => frame.type === "error.retry").map((frame) => frame.data.attempt), [2, 3]);
+    assert.equal(frames.filter((frame) => frame.type === "error").length, 0);
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });
 

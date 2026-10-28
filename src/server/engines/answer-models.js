@@ -38,6 +38,17 @@ const CEREBRAS_ORIGIN = "https://api.cerebras.ai";
 const CEREBRAS_THINKING_EFFORT = "high";
 
 /**
+ * The Cerebras preset: what CEREBRAS_API_KEY configures when no LLM_*
+ * variable overrides it (config.js applyVendorPresets), and the Cerebras rung
+ * of the stand-in ladder (index.js createSelectableAnswerer).
+ */
+export const CEREBRAS = Object.freeze({
+  baseUrl: `${CEREBRAS_ORIGIN}/v1`,
+  model: "qwen-3.8-27b",
+  reasoningEffort: CEREBRAS_THINKING_EFFORT,
+});
+
+/**
  * The three Settings choices, default first. "cerebras-qwen-thinking" is the
  * configured engine with reasoning_effort "high"; that engine is the Cerebras
  * preset (qwen-3.8-27b) whenever CEREBRAS_API_KEY is set and no LLM_*

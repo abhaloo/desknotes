@@ -129,6 +129,29 @@ export class AnswerBuffer {
     return entry;
   }
 
+  /**
+   * `error.retry`: the server discarded a failed attempt (a provider that
+   * stalled mid-answer) and is generating the whole answer again for the
+   * same turn. The card starts over: its text so far goes, so the retry's
+   * tokens paint from the start; the question, gate and start time stay.
+   * A retry for another turn, or for a turn the user cleared, changes nothing.
+   * @param {{turn_id?: string, attempt?: number}} frame
+   * @param {number} [at]
+   * @returns {object|null} the active entry, or null when nothing changed
+   */
+  restart(frame = {}, at = 0) {
+    const id = typeof frame.turn_id === "string" && frame.turn_id ? frame.turn_id : null;
+    const entry = this.#active;
+    if (!entry || (id && entry.id !== id) || (id && this.#cleared.has(id))) return null;
+    entry.text = "";
+    entry.done = false;
+    entry.truncated = false;
+    entry.cut = null;
+    entry.fallback = null;
+    entry.updatedAt = at;
+    return entry;
+  }
+
   /** `turn.superseded` retires a card whose turn a newer one replaced. */
   supersede(frame = {}, at = 0) {
     const id = typeof frame.turn_id === "string" && frame.turn_id ? frame.turn_id : null;

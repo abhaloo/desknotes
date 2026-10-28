@@ -319,7 +319,8 @@ test("the failover runs only on a refusal, and never onto the same origin", asyn
   } finally {
     chat.restore();
   }
-  // Already answering on DeepSeek: another attempt on the same origin is pointless.
+  // A refused DeepSeek choice replays on the next rung (Cerebras here), never
+  // on DeepSeek thinking: another attempt on the same origin is pointless.
   chat = refusingChat({ refuseOrigin: "https://api.deepseek.com" });
   try {
     const answerer = createSelectableAnswerer({
@@ -327,6 +328,23 @@ test("the failover runs only on a refusal, and never onto the same origin", asyn
       selectModel: () => "deepseek-flash",
       deepseekApiKey: DEEPSEEK_KEY,
       cerebrasAvailable: true,
+    });
+    assert.equal(await answerer.answerOnce({ question: "q" }), "• ok");
+    assert.deepEqual(
+      chat.calls.map((call) => call.url),
+      ["https://api.deepseek.com/chat/completions", "https://api.cerebras.ai/v1/chat/completions"],
+    );
+  } finally {
+    chat.restore();
+  }
+  // With DeepSeek the only engine, a refused DeepSeek choice has no rung: the refusal surfaces.
+  chat = refusingChat({ refuseOrigin: "https://api.deepseek.com" });
+  try {
+    const answerer = createSelectableAnswerer({
+      options: { provider: "unconfigured", model: "mock" },
+      selectModel: () => "deepseek-flash",
+      deepseekApiKey: DEEPSEEK_KEY,
+      cerebrasAvailable: false,
     });
     await assert.rejects(() => answerer.answerOnce({ question: "q" }), /HTTP 402/);
     assert.equal(chat.calls.length, 1);

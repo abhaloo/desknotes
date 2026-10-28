@@ -20,6 +20,14 @@
  * CARD_LIMITS lines by the spoken-text filter. The answerer adds the card
  * rule, checks that line 1 is a VERDICT line (one retry), and cuts runaway
  * streams.
+ *
+ * Stalls: a provider that stops sending bytes (`stallMs`, default
+ * DEFAULT_STALL_MS) is dropped and the answer fails with a `stalled` error
+ * (code "stalled", retryable), so the pipeline can generate the answer again
+ * instead of parking the turn until the session ends. Any bytes count as
+ * progress (a reasoning-only event, a keep-alive comment), never just visible
+ * tokens: a thinking model is quiet on content for seconds while it streams
+ * its reasoning.
  */
 import { checkProviderUrl, httpStatusError, providerFetch, readJsonCapped } from "./provider-http.js";
 import { unrefTimer } from "../../shared/timers.js";
@@ -133,6 +141,13 @@ const MAX_QUESTION_CHARS = 4_000;
 const MAX_CONTEXT_CHARS = 32_000;
 /** A priming request that has not answered by then is dropped: nothing waits for it. */
 const PRIME_TIMEOUT_MS = 10_000;
+/**
+ * No bytes from the provider for this long and the answer has stalled. Normal
+ * gaps between chunks are well under a second on every supported engine, and
+ * a thinking phase still streams reasoning bytes; an empty card for longer
+ * than this is already past what a rep on a call tolerates.
+ */
+export const DEFAULT_STALL_MS = 8_000;
 
 /**
  * @param {{provider?: string, model?: string, baseUrl?: string, apiKey?: string,
@@ -141,7 +156,7 @@ const PRIME_TIMEOUT_MS = 10_000;
  *   promptMode?: "spoken" | "technical", routes?: object,
  *   answerInstructionsPath?: string|null,
  *   deltaMinMs?: number, deltaMaxMs?: number, maxAnswerChars?: number,
- *   spokenFilter?: boolean, log?: Function}} [options]  reasoningEffort: sent as
+ *   stallMs?: number, spokenFilter?: boolean, log?: Function}} [options]  reasoningEffort: sent as
  *   `reasoning_effort` when set (e.g. "none" on a reasoning model, whose hidden
  *   reasoning would otherwise delay the first visible token). thinking: the
  *   DeepSeek thinking switch (answer-models.js providerRequestExtras); off
@@ -153,7 +168,8 @@ const PRIME_TIMEOUT_MS = 10_000;
  *   base options. answerInstructionsPath: the user's answer-instructions.txt,
  *   read again for every spoken-mode provider answer (an explicit systemPrompt
  *   wins; an unreadable file uses the built-in one). The technical mode keeps
- *   its own prompt.
+ *   its own prompt. stallMs: how long a provider may send nothing before the
+ *   answer fails as `stalled` (DEFAULT_STALL_MS; provider answers only).
  * @returns {{streamAnswer: Function, answerOnce: Function, prime: Function}}
  */
 export function createAnswerer({
@@ -171,6 +187,7 @@ export function createAnswerer({
   deltaMinMs = DEFAULT_DELTA_MIN_MS,
   deltaMaxMs = DEFAULT_DELTA_MAX_MS,
   maxAnswerChars = DEFAULT_MAX_ANSWER_CHARS,
+  stallMs = DEFAULT_STALL_MS,
   spokenFilter = true,
   log,
 } = {}) {
@@ -271,7 +288,9 @@ export function createAnswerer({
           signal,
           retry: attempt > 0,
           maxAnswerChars,
+          stallMs,
           onLimit,
+          warn,
         });
       const lengthCut = () => noteCut("length");
       if (!spokenFilter) {
@@ -647,7 +666,9 @@ async function* streamFromChat({
   reasoningEffort,
   thinking,
   maxAnswerChars = DEFAULT_MAX_ANSWER_CHARS,
+  stallMs = DEFAULT_STALL_MS,
   onLimit = () => {},
+  warn = () => {},
 }) {
   if (!baseUrl || !apiKey) {
     throw new Error("answerer: provider openai-compatible requires baseUrl and apiKey");
@@ -680,29 +701,39 @@ async function* streamFromChat({
     signal.addEventListener?.("abort", onAbort, { once: true });
   }
 
+  // The stall watchdog: every byte from the provider (headers, any chunk)
+  // is progress. When `stallMs` pass with none, the request is aborted and
+  // the answer fails as `stalled`. The wait on the provider is also raced
+  // against the watchdog's own rejection, so the answer ends on time even on
+  // a runtime that does not fail a pending read when its fetch is aborted.
+  const watchdog = createStallWatchdog(stallMs, () => controller.abort());
   let reader = null;
   let doneSeen = false;
+  let emitted = 0;
   try {
-    const response = await providerFetch(
-      url,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${apiKey}`,
+    const response = await watchdog.race(
+      providerFetch(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
         },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      },
-      { apiKey },
+        { apiKey },
+      ),
     );
+    watchdog.progress();
     // The status rides on the error: the pipeline retries a 5xx, never a
     // refusal (402 out of credit, 401 key, 403 paywalled model).
     if (!response.ok) throw httpStatusError("answerer: chat endpoint", response);
 
     const contentType = response.headers?.get?.("content-type") ?? "";
     if (!response.body || !contentType.includes("event-stream")) {
-      const payload = await readJsonCapped(response);
+      const payload = await watchdog.race(readJsonCapped(response));
       const text = payload?.choices?.[0]?.message?.content;
       if (text && String(text).length > maxAnswerChars) onLimit();
       if (text) yield String(text).slice(0, maxAnswerChars);
@@ -712,10 +743,10 @@ async function* streamFromChat({
     reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let emitted = 0;
     for (;;) {
-      const { value, done } = await reader.read();
+      const { value, done } = await watchdog.race(reader.read());
       if (done) break;
+      watchdog.progress();
       buffer += decoder.decode(value, { stream: true });
       if (buffer.length > MAX_SSE_LINE_CHARS && buffer.indexOf("\n") < 0) {
         throw new Error("answerer: provider SSE line exceeds limit");
@@ -748,7 +779,18 @@ async function* streamFromChat({
         }
       }
     }
+  } catch (error) {
+    // The watchdog's abort surfaces as the runtime's AbortError (or as its
+    // own rejection): name it as a stall unless the caller aborted, which
+    // stays an abort.
+    if (watchdog.stalled && !signal?.aborted) {
+      const afterMs = watchdog.stalled;
+      warn({ type: "answerer.stalled", after_ms: afterMs, emitted });
+      throw stalledError(afterMs, emitted);
+    }
+    throw error;
   } finally {
+    watchdog.stop();
     signal?.removeEventListener?.("abort", onAbort);
     // An early exit (line cap, abort, consumer stop, error) cancels the stream.
     // After [DONE] the rest of the body is read in the background so the
@@ -784,4 +826,67 @@ function drainThenRelease(reader) {
       clearTimeout(timer);
     }
   })();
+}
+
+/**
+ * A provider that sent nothing for `afterMs`. `retryable`: the pipeline
+ * generates the answer again (a stall is not a refusal). The message never
+ * says "abort": the pipeline reads that word as its own cancel and would
+ * stay silent.
+ * @param {number} afterMs
+ * @param {number} emitted characters delivered before the stall
+ */
+function stalledError(afterMs, emitted) {
+  const error = new Error(`answerer: provider stalled (no data for ${afterMs} ms)`);
+  error.code = "stalled";
+  error.retryable = true;
+  error.emitted = emitted;
+  return error;
+}
+
+/**
+ * Watches the gaps between progress events. One timer, re-armed only when it
+ * fires (never per chunk): when it wakes and the last progress is older than
+ * `stallMs`, it calls `onStall`, records the gap in `stalled` and rejects
+ * every wait raced through it; otherwise it sleeps for what is left of the
+ * budget. `race(promise)` settles with the promise or with the stall,
+ * whichever comes first. `stop()` releases the timer; nothing fires after it.
+ * A budget that is not a positive number disables the watchdog.
+ */
+function createStallWatchdog(stallMs, onStall) {
+  const budget = Number(stallMs);
+  const enabled = Number.isFinite(budget) && budget > 0;
+  let lastProgressAt = Date.now();
+  let timer = null;
+  let rejectStall = null;
+  const watchdog = { stalled: 0 };
+  const stall = new Promise((_resolve, reject) => {
+    rejectStall = reject;
+  });
+  stall.catch(() => {}); // only raced waits observe it; an unraced stall is not an unhandled rejection
+  function arm(ms) {
+    timer = unrefTimer(
+      setTimeout(() => {
+        timer = null;
+        const idle = Date.now() - lastProgressAt;
+        if (idle < budget) {
+          arm(budget - idle);
+          return;
+        }
+        watchdog.stalled = idle;
+        rejectStall(new Error("stalled"));
+        onStall();
+      }, ms),
+    );
+  }
+  if (enabled) arm(budget);
+  watchdog.progress = () => {
+    lastProgressAt = Date.now();
+  };
+  watchdog.race = (promise) => (enabled ? Promise.race([promise, stall]) : promise);
+  watchdog.stop = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+  return watchdog;
 }

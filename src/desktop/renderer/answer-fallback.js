@@ -3,7 +3,8 @@
  *
  * turn.done carries `fallback` = `{to, from?, reason?}` when the chosen answer
  * model could not answer (no key, out of credit, a rejected key, a rate
- * limit) and another one did (src/server/engines/index.js). The rep only
+ * limit, a stall or another failure twice over) and another one did
+ * (src/server/engines/index.js). The rep only
  * needs two facts at a glance: which model wrote this card, and why the
  * chosen one did not. So the line is "Fallback: <model> · <why>", painted in
  * the muted note style after the last card line, like "Answer cut short.".
@@ -16,6 +17,8 @@ const REASONS = Object.freeze({
   key_rejected: (from) => `${from} key rejected`,
   refused: (from) => `${from} refused`,
   rate_limited: (from) => `${from} rate-limited`,
+  stalled: (from) => `${from} stalled`,
+  failed: (from) => `${from} failed`,
   unavailable: (from) => `${from} unavailable`,
   no_key: (from) => `no key for ${from}`,
 });

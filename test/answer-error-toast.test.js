@@ -46,3 +46,10 @@ test("the overlay turns error and error.retry frames into toasts", () => {
   // The toast has a style for the info kind it now uses.
   assert.match(read("styles.css"), /\.toast\[data-kind="info"\]/);
 });
+
+test("error.retry also starts the card over before the retry's tokens arrive", () => {
+  const app = read("app.js");
+  // The buffer resets the card (answers.restart) and the card repaints: `break` to renderAnswer, not `return`.
+  assert.match(app, /case "error\.retry":[\s\S]{0,400}answers\.restart\(data, Date\.now\(\)\)/);
+  assert.match(app, /case "error\.retry":(?:(?!return;)[\s\S]){0,400}break;/);
+});

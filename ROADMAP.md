@@ -4,9 +4,6 @@ Work planned for DeskNotes, roughly in order. Estimates are rough.
 
 ## Reliability
 
-- **Stalled answers recover on their own (3 h).** Abort an answer stream that
-  sends nothing for several seconds, then use the existing retry path. Today
-  a provider that stalls mid-answer blocks the session until you end it.
 - **Audio calls have deadlines (3 h).** Starting a device or listing devices
   times out instead of waiting forever, so End never hangs.
 - **End during Start (3 h).** Pressing End while a session is still

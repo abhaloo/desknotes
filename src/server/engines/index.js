@@ -6,7 +6,7 @@
  * connection, so every session gets fresh ASR/answer state but shares config.
  */
 import { createAnswerer } from "./answerer.js";
-import { CEREBRAS_THINKING_MODEL, DEEPSEEK, answerModelChoice, applyAnswerModelSelection, engineShortName } from "./answer-models.js";
+import { CEREBRAS, CEREBRAS_THINKING_MODEL, answerModelChoice, applyAnswerModelSelection, engineShortName } from "./answer-models.js";
 import { sameOrigin } from "../../security/url-policy.js";
 import { createAsr } from "./asr.js";
 import { createGlossary } from "./glossary.js";
@@ -32,7 +32,8 @@ export { createAnswerer, createAsr, createGlossary, createJudge, createPipelineE
  *   ["prospect"]). answerModelResolver: the Settings answer-model choice, read
  *   for every answer (answerModel is the fixed fallback); deepseekApiKey: the
  *   key a DeepSeek choice uses; cerebrasAvailable: whether CEREBRAS_API_KEY is
- *   set, so the Qwen default can run (logged as unavailable otherwise).
+ *   set, so the Qwen default can run (logged as unavailable otherwise);
+ *   cerebrasApiKey: that key, the Cerebras rung of the stand-in ladder.
  *   repContextResolver: the Settings "Use what I say in answers" choice, read
  *   for every answer (repContext, from REP_CONTEXT, is the fixed fallback;
  *   both default on). highlightsResolver: the Settings "Highlight key
@@ -64,6 +65,7 @@ export function createEngineFactory(config = {}) {
     typeof config.answerModelResolver === "function" ? config.answerModelResolver : () => config.answerModel ?? null;
   const deepseekApiKey = config.deepseekApiKey ?? null;
   const cerebrasAvailable = config.cerebrasAvailable;
+  const cerebrasApiKey = config.cerebrasApiKey ?? null;
   const repContext =
     typeof config.repContextResolver === "function" ? config.repContextResolver : config.repContext !== false;
   const highlights =
@@ -85,7 +87,7 @@ export function createEngineFactory(config = {}) {
       emit,
       log,
       asrOptions,
-      answerer: createSelectableAnswerer({ options: answererOptions, selectModel, deepseekApiKey, cerebrasAvailable, log }),
+      answerer: createSelectableAnswerer({ options: answererOptions, selectModel, deepseekApiKey, cerebrasAvailable, cerebrasApiKey, log }),
       answererOptions,
       visionOptions,
       answerRoles,
@@ -118,15 +120,28 @@ const RATE_LIMIT_PAUSE_MS = 30_000;
 const REFUSAL_PAUSE_MS = 5 * 60_000;
 
 /**
- * The engine a refused answer is replayed on: DeepSeek V4.1 Flash with
- * thinking on, the same model as the default Settings choice, so a substitute
- * answer reads like the one the session was configured for.
+ * The DeepSeek rung of the ladder, and the engine that stands in for a choice
+ * with no key: DeepSeek V4.1 Flash with thinking on, the same model as the
+ * default Settings choice, so a substitute answer reads like the one the
+ * session was configured for.
  */
 const FAILOVER_ANSWER_MODEL = "deepseek-flash-thinking";
+
+/** The fallback note's reason for a stand-in the pipeline asked for (`streamAnswer({standIn, retryOf})`). */
+const STAND_IN_REASONS = Object.freeze({ stalled: "stalled", error: "failed" });
 
 /** An engine the answerer can really call (live mode never configures the mock). */
 function isLiveEngine(options) {
   return options?.provider === "openai-compatible" && Boolean(options.baseUrl) && Boolean(options.apiKey);
+}
+
+/** The origin of a base URL, or null when it is not a URL. */
+function originOf(baseUrl) {
+  try {
+    return new URL(String(baseUrl)).origin;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -139,7 +154,7 @@ function isLiveEngine(options) {
  * so the next prime (session start, document change) is sent for it, and a
  * DeepSeek choice never primes.
  *
- * Another engine stands in for the chosen one in two cases. Each answer it
+ * Another engine stands in for the chosen one in three cases. Each answer it
  * gives is reported once through `streamAnswer({onFallback})` as
  * `{to, from, reason}` (short names, never keys); the pipeline puts it on
  * turn.done so the card can say so.
@@ -150,25 +165,40 @@ function isLiveEngine(options) {
  *   `no_answer_model`.
  * - The chosen engine REFUSES the request before its first token (401 key,
  *   402 out of credit, 403 paywalled model, 429 quota): the same request is
- *   replayed once on DeepSeek V4.1 Flash with thinking on when
- *   DEEPSEEK_API_KEY is present, and `engine.answer_failover` is logged. The
- *   refused engine is then skipped for RATE_LIMIT_PAUSE_MS (429) or
- *   REFUSAL_PAUSE_MS, so later answers do not wait for the same refusal.
+ *   replayed on the next rung of the ladder (below), and
+ *   `engine.answer_failover` is logged. The refused engine is then skipped
+ *   for RATE_LIMIT_PAUSE_MS (429) or REFUSAL_PAUSE_MS, so later answers do
+ *   not wait for the same refusal. A rung that refuses is paused the same
+ *   way and the next rung is tried.
+ * - The pipeline asks for a stand-in (`streamAnswer({standIn: true,
+ *   retryOf})`, its last retry after the chosen engine failed twice: a
+ *   stall, a 5xx, a dropped connection): the answer goes to the first rung
+ *   of the ladder that is not paused (reason "stalled" or "failed"). Nothing
+ *   is paused for it: the next answer goes to the chosen engine again.
+ *
+ * The ladder (`ladderFor`) is every engine with a key, fastest first:
+ * Cerebras Qwen (CEREBRAS_API_KEY; the configured options when they are on
+ * that origin), DeepSeek Flash with thinking (DEEPSEEK_API_KEY), then a
+ * configured LLM_* engine on any other origin. The chosen engine's origin is
+ * never on its own ladder: the same provider would fail the same way. With
+ * no rung left, the chosen engine answers again, with no note.
  *
  * @param {{options?: object, selectModel?: () => string|null, deepseekApiKey?: string|null,
- *   cerebrasAvailable?: boolean, log?: Function, now?: () => number}} [config]
+ *   cerebrasAvailable?: boolean, cerebrasApiKey?: string|null, log?: Function, now?: () => number}} [config]
  */
 export function createSelectableAnswerer({
   options = {},
   selectModel = () => null,
   deepseekApiKey = null,
   cerebrasAvailable,
+  cerebrasApiKey = null,
   log,
   now = Date.now,
 } = {}) {
   let current = null;
-  let failover = null;
-  /** Selection key -> {until, reason, status}: engines skipped after a refusal. */
+  /** Rung key -> answerer: a rung's answerer is built when first needed, then kept. */
+  const rungAnswerers = new Map();
+  /** Engine key -> {until, reason, status}: engines skipped after a refusal. */
   const paused = new Map();
 
   /** DeepSeek V4.1 Flash with thinking, as an applied selection, or null without its key. */
@@ -220,7 +250,7 @@ export function createSelectableAnswerer({
       .map((part) => part ?? "")
       .join("|");
     if (!current || key !== current.key) {
-      current = { key, options: effective, note, answerer: createAnswerer({ ...effective, log }) };
+      current = { key, choice: applied.choice, options: effective, note, answerer: createAnswerer({ ...effective, log }) };
       log?.({
         type: "engine.answer_model",
         selected: applied.choice || "qwen",
@@ -234,20 +264,61 @@ export function createSelectableAnswerer({
     return current;
   }
 
-  /**
-   * The answerer to replay on instead of `selection`, or null. Built and
-   * cached only when first needed: a session that never fails never touches
-   * DeepSeek. Never onto the DeepSeek origin itself (it would refuse the same way).
-   */
-  function failoverFrom(selection) {
-    if (selection.options.baseUrl && sameOrigin(selection.options.baseUrl, DEEPSEEK.baseUrl)) return null;
+  /** The Cerebras rung: the configured options when they are on that origin, else the preset with the Cerebras key. */
+  function cerebrasRung() {
+    if (isLiveEngine(options) && sameOrigin(options.baseUrl, CEREBRAS.baseUrl)) return { options, choice: CEREBRAS_THINKING_MODEL };
+    if (!cerebrasApiKey) return null;
+    return {
+      options: { ...options, provider: "openai-compatible", baseUrl: CEREBRAS.baseUrl, apiKey: cerebrasApiKey, model: CEREBRAS.model, reasoningEffort: CEREBRAS.reasoningEffort, thinking: undefined },
+      choice: CEREBRAS_THINKING_MODEL,
+    };
+  }
+
+  /** The DeepSeek rung, or null without its key. */
+  function deepseekRung() {
     const applied = deepseekStandIn();
-    if (!applied) return null;
-    const key = `${applied.options.baseUrl}|${applied.options.model}`;
-    if (!failover || key !== failover.key) {
-      failover = { key, applied, answerer: createAnswerer({ ...applied.options, log }) };
+    return applied ? { options: applied.options, choice: applied.choice } : null;
+  }
+
+  /** The configured LLM_* engine as a rung, when it is a real engine. */
+  function configuredRung() {
+    return isLiveEngine(options) ? { options, choice: "configured" } : null;
+  }
+
+  /**
+   * The engines that can stand in for `selection`, fastest first, one per
+   * origin, never the chosen engine's own origin. Each rung carries the key
+   * its pause is kept under; its answerer is built when first asked
+   * (`answererOf`), so a session that never fails never touches another engine.
+   */
+  function ladderFor(selection) {
+    const rungs = [];
+    const seen = new Set();
+    const chosen = selection.options.baseUrl ?? null;
+    for (const rung of [cerebrasRung(), deepseekRung(), configuredRung()]) {
+      if (!rung) continue;
+      const origin = originOf(rung.options.baseUrl);
+      if (!origin || seen.has(origin) || (chosen && sameOrigin(rung.options.baseUrl, chosen))) continue;
+      seen.add(origin);
+      const key = `${rung.options.baseUrl}|${rung.options.model}|${rung.options.thinking ?? ""}`;
+      rungs.push({ key, options: rung.options, choice: rung.choice });
     }
-    return failover;
+    return rungs;
+  }
+
+  /** The answerer of the chosen engine or a rung, built once per rung. */
+  function answererOf(engine) {
+    if (engine.answerer) return engine.answerer;
+    if (!rungAnswerers.has(engine.key)) rungAnswerers.set(engine.key, createAnswerer({ ...engine.options, log }));
+    return rungAnswerers.get(engine.key);
+  }
+
+  /** The first rung after index `from` that is not paused, or null. */
+  function nextRung(rungs, from) {
+    for (let i = from + 1; i < rungs.length; i += 1) {
+      if (!pauseOf(rungs[i].key)) return { rung: rungs[i], index: i };
+    }
+    return null;
   }
 
   /** The pause on `key`, or null once it has run out. */
@@ -259,17 +330,17 @@ export function createSelectableAnswerer({
     return null;
   }
 
-  function logFailover(selection, next, status, extra = {}) {
+  function logFailover(from, next, status, extra = {}) {
     // Names and a status only: the log is written beside the session files.
     log?.({
       type: "engine.answer_failover",
       status,
-      from: selection.options.model ?? "configured",
-      to: next.applied.options.model,
+      from: from.options.model ?? "configured",
+      to: next.options.model,
       // Both DeepSeek choices share one model id: the choice and the thinking
       // flag are what tell the two apart in a session file.
-      choice: next.applied.choice,
-      thinking: next.applied.options.thinking ?? null,
+      choice: next.choice,
+      thinking: next.options.thinking ?? null,
       ...extra,
     });
   }
@@ -280,32 +351,47 @@ export function createSelectableAnswerer({
 
   async function* streamAnswer(args = {}) {
     const selection = selectionNow();
+    const rungs = ladderFor(selection);
+    const chosen = { key: selection.key, options: selection.options, choice: selection.choice, answerer: selection.answerer };
+    // Where the answer starts: the chosen engine, unless the pipeline asked
+    // for a stand-in or the chosen engine is paused; then the first open rung.
+    let engine = chosen;
+    let index = -1;
     const pause = pauseOf(selection.key);
-    const skip = pause ? failoverFrom(selection) : null;
-    if (skip) {
-      logFailover(selection, skip, pause.status, { paused: true });
-      report(args, { to: engineShortName(skip.applied.options), from: engineShortName(selection.options), reason: pause.reason });
-      yield* skip.answerer.streamAnswer(args);
-      return;
+    const standIn = args.standIn === true ? nextRung(rungs, -1) : null;
+    if (standIn) {
+      const reason = STAND_IN_REASONS[args.retryOf] ?? STAND_IN_REASONS.error;
+      ({ rung: engine, index } = standIn);
+      log?.({ type: "engine.answer_stand_in", reason, from: chosen.options.model ?? "configured", to: engine.options.model, choice: engine.choice });
+      report(args, { to: engineShortName(engine.options), from: engineShortName(chosen.options), reason });
+    } else if (pause && nextRung(rungs, -1)) {
+      ({ rung: engine, index } = nextRung(rungs, -1));
+      logFailover(chosen, engine, pause.status, { paused: true });
+      report(args, { to: engineShortName(engine.options), from: engineShortName(chosen.options), reason: pause.reason });
+    } else {
+      report(args, selection.note);
     }
-    report(args, selection.note);
-    let emitted = false;
-    try {
-      for await (const delta of selection.answerer.streamAnswer(args)) {
-        emitted = true;
-        yield delta;
+    for (;;) {
+      let emitted = false;
+      try {
+        for await (const delta of answererOf(engine).streamAnswer(args)) {
+          emitted = true;
+          yield delta;
+        }
+        return;
+      } catch (error) {
+        // A refusal before the first token moves to the next rung; anything
+        // else (a failure after the first token, a 5xx, a stall) is the
+        // pipeline's to retry.
+        const status = Number(error?.status);
+        const reason = REFUSAL_REASONS[status];
+        const next = !emitted && reason ? nextRung(rungs, index) : null;
+        if (!next) throw error;
+        paused.set(engine.key, { until: now() + (status === 429 ? RATE_LIMIT_PAUSE_MS : REFUSAL_PAUSE_MS), reason, status });
+        logFailover(engine, next.rung, status);
+        report(args, { to: engineShortName(next.rung.options), from: engineShortName(engine.options), reason });
+        ({ rung: engine, index } = next);
       }
-    } catch (error) {
-      // A provider that stops mid-answer is not replayed: the text already on
-      // screen is the answer.
-      const status = Number(error?.status);
-      const reason = REFUSAL_REASONS[status];
-      const next = !emitted && reason ? failoverFrom(selection) : null;
-      if (!next) throw error;
-      paused.set(selection.key, { until: now() + (status === 429 ? RATE_LIMIT_PAUSE_MS : REFUSAL_PAUSE_MS), reason, status });
-      logFailover(selection, next, status);
-      report(args, { to: engineShortName(next.applied.options), from: engineShortName(selection.options), reason });
-      yield* next.answerer.streamAnswer(args);
     }
   }
 

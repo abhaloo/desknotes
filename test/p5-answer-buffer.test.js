@@ -77,6 +77,49 @@ test("buffer truncates pathological streams but keeps the head", () => {
   assert.equal(buffer.active.text, "final");
 });
 
+test("error.retry starts the card over: the partial text goes, the question and start time stay", () => {
+  // The server discarded a stalled attempt and is generating the whole answer
+  // again for the same turn: what the retry streams must not append to the
+  // half an answer already on the card.
+  const buffer = new AnswerBuffer();
+  buffer.start({ turn_id: "a1", question: "what about pricing", gate_seq: 3 }, 10);
+  const question = buffer.active.question;
+  buffer.append({ turn_id: "a1", delta: "Fifty seats " }, 20);
+  const entry = buffer.restart({ turn_id: "a1", attempt: 2 }, 30);
+  assert.equal(entry, buffer.active);
+  assert.equal(entry.text, "");
+  assert.equal(entry.done, false);
+  assert.equal(entry.truncated, false);
+  assert.equal(entry.question, question);
+  assert.equal(entry.gateSeq, 3);
+  assert.equal(entry.startedAt, 10);
+  assert.equal(entry.updatedAt, 30);
+  assert.equal(buffer.isStreaming, true, "the card is still on its way");
+  buffer.append({ turn_id: "a1", delta: "Fifty seats is one plan." }, 40);
+  assert.equal(buffer.active.text, "Fifty seats is one plan.");
+
+  // A retry for another turn touches nothing.
+  buffer.restart({ turn_id: "a0", attempt: 2 }, 50);
+  assert.equal(buffer.active.text, "Fifty seats is one plan.");
+  assert.equal(buffer.active.id, "a1");
+
+  // A truncated head is dropped with the rest: the retry paints from the start.
+  const small = new AnswerBuffer({ maxChars: 10 });
+  small.append({ turn_id: "b1", delta: "0123456789abcdef" }, 1);
+  assert.equal(small.active.truncated, true);
+  small.restart({ turn_id: "b1", attempt: 2 }, 2);
+  assert.equal(small.active.truncated, false);
+  small.append({ turn_id: "b1", delta: "short" }, 3);
+  assert.equal(small.active.text, "short");
+
+  // A turn the user cleared stays cleared: the retry does not bring the card back.
+  const cleared = new AnswerBuffer();
+  cleared.append({ turn_id: "c1", delta: "Fifty " }, 1);
+  cleared.clear();
+  assert.equal(cleared.restart({ turn_id: "c1", attempt: 2 }, 2), null);
+  assert.equal(cleared.active, null);
+});
+
 test("interim transcript mutates one trailing line, finals commit it", () => {
   const lanes = new TranscriptLanes();
   lanes.ingest({ role: "prospect", text: "Tell me about", final: false, seq: 1 }, 100);

@@ -143,7 +143,7 @@ Stream indices and hello stream descriptors (topology "general"):
   (a card budget ran out). `fallback` = `{to, from?, reason?}` (additive) is
   present only when a model other than the chosen one wrote the answer: short
   model names and a reason code (`no_key`, `unavailable`, `out_of_credit`,
-  `key_rejected`, `refused`, `rate_limited`). The desktop overlay shows it as
+  `key_rejected`, `refused`, `rate_limited`, `stalled`, `failed`). The desktop overlay shows it as
   one muted line after the card ("Fallback: DeepSeek Flash · Qwen 27B out of
   credit"). With highlights on (the default;
   `HIGHLIGHTS=0` or the Settings checkbox "Highlight key phrases" turns them
@@ -191,11 +191,16 @@ Stream indices and hello stream descriptors (topology "general"):
   ignoring the call. Live mode has no demo answers: with no usable answer
   model every turn fails this way ("answerer: no answer model is set up").
 - `error.retry` — `{v, type:"error.retry", seq, data:{turn_id, attempt}}`:
-  a generation error the server is retrying transparently (the overlay shows
-  "The answer model faltered. Retrying now."). A refusal is not retried: a
-  non-retryable status (401/402/403/429, or `x-should-retry: false`) is
-  replayed on the failover engine instead, and only a real failure emits
-  `error`.
+  a generation failure the server is retrying transparently (the overlay
+  shows "The answer model faltered. Retrying now."). The card for `turn_id`
+  starts over: the client drops the text it has shown for that turn, and the
+  retry's `turn.token` frames carry the whole answer again from its first
+  token (a provider that stalls or drops the connection may have painted
+  half an answer). `attempt` is 2, then 3: the chosen engine once more, then
+  the stand-in engine, whose `turn.done` carries `fallback` with reason
+  `stalled` or `failed`. A refusal is not retried: a non-retryable status
+  (401/402/403/429, or `x-should-retry: false`) is replayed on the failover
+  engine instead, and only a real failure emits `error`.
 - `session.ended` — terminal. Any later close is terminal for the client.
 - `pong`.
 

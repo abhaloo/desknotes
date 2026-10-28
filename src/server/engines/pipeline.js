@@ -116,6 +116,15 @@
  * the speculative answer it starts sends the same prefix at the same moment,
  * so a prime there would only add a request beside the answer.
  *
+ * Retries: a generation that fails (a stall, answerer.js `error.code ===
+ * "stalled"`; a 5xx; a dropped connection), before or after its first
+ * token, is generated again for the same turn: the partial card is discarded
+ * (`error.retry` tells the client to start the card over), first on the
+ * chosen engine again, then (`standIn: true`) on the stand-in engine the
+ * answerer picks; MAX_RETRIES in all. A refusal (`error.retryable ===
+ * false`) is never retried: the provider already said no. Rescues are never
+ * retried.
+ *
  * Terms (`glossary`, on by default, with a `glossaryEngine`; glossary.js):
  * once the client has a committed card's `turn.done` (a rescue counts;
  * superseded, held, shadow and failed turns never do), one background request
@@ -176,6 +185,8 @@ export const SCREEN_CONTEXT_TTL_MS = 10 * 60_000;
 const SCREEN_ONLY_QUESTION = "Answer the question or task shown on the screen.";
 /** Priming waits this long for more changes (a session start and its document arrive together). */
 const PRIME_DEBOUNCE_MS = 300;
+/** Retries a failed answer gets: the chosen engine again, then the stand-in. */
+const MAX_RETRIES = 2;
 /** Turn reasons the gate judges. Manual requests and rescues are never gated. */
 const GATED_REASONS = new Set([
   "partial_trigger",
@@ -818,7 +829,7 @@ export function createPipelineEngine({
       finished: false,
       doneEmitted: false,
       cancelled: false,
-      retried: false,
+      retries: 0,
       startedAt: now(),
       // Screen turns only: stage timings, the prospect lines the prompt
       // carries, and the shorter question follow-ups see in RECENT EXCHANGE.
@@ -950,6 +961,10 @@ export function createPipelineEngine({
         ...answerArgs({ question: target.generatedFor, prospect: target.prospect ?? null, screenTurn: !!target.screenTurn }),
         intent: target.intent,
         signal: target.controller.signal,
+        // A retry says why, and the last stall retry asks for the stand-in
+        // engine (createSelectableAnswerer answers on the other provider).
+        ...(target.retryOf ? { retryOf: target.retryOf } : {}),
+        ...(target.standIn ? { standIn: true } : {}),
         // The answerer says when the delivered text is not the whole answer;
         // turn.done carries it so the card can say so.
         onCut: (reason) => {
@@ -1033,17 +1048,33 @@ export function createPipelineEngine({
       if (target.cancelled || turn !== target || isAbort(err)) return;
       target.text = text;
       target.error = String(err?.message ?? err);
-      if (!target.retried && text.length === 0 && err?.retryable !== false) {
-        // One transparent retry: the client is told a retry is
-        // happening so a slow answer reads as "working", not "broken".
-        // A refusal is not retried: the provider already said no (402 out of
-        // credit carries `x-should-retry: false`), so the second attempt would
-        // land on the same wall and only delay the error the user needs.
-        target.retried = true;
+      if (canRetry(target, err)) {
+        // A transparent retry: the client is told a retry is happening so a
+        // slow answer reads as "working", not "broken", and starts the card
+        // over (a stall or a dropped connection may have painted half an
+        // answer). A refusal is not retried: the provider already said no
+        // (402 out of credit carries `x-should-retry: false`), so the second
+        // attempt would land on the same wall and only delay the error the
+        // user needs.
+        target.retries += 1;
+        target.retryOf = err?.code === "stalled" ? "stalled" : "error";
+        // The last retry moves to the stand-in engine.
+        target.standIn = target.retries >= MAX_RETRIES;
+        target.text = "";
+        target.error = null;
+        const attempt = target.retries + 1;
+        logger({
+          type: "turn.retry",
+          turn_id: target.id,
+          reason: target.retryOf,
+          attempt,
+          chars: text.length,
+          stand_in: target.standIn,
+        });
         emitFrame({
           v: PROTOCOL_VERSION,
           type: "error.retry",
-          data: { turn_id: target.id, attempt: 2 },
+          data: { turn_id: target.id, attempt },
         });
         target.controller = new AbortController();
         return void runGeneration(target);
@@ -1093,9 +1124,9 @@ export function createPipelineEngine({
           ...(target.fallback ? { fallback: target.fallback } : {}),
           ...(target.screenTurn ? { screen: screenTimings(target) } : {}),
         });
-        // Keyed on the finish reason, not on target.error: a failed empty
-        // attempt leaves target.error set when its retry delivers, and that
-        // delivered answer must still be recorded.
+        // Keyed on the finish reason: only a turn that ends in an error is
+        // left out, never one whose earlier attempt failed and whose retry
+        // delivered.
         if (reason !== "error") rememberExchange(target);
         scheduleTerms(target);
       }
@@ -1310,7 +1341,7 @@ export function createPipelineEngine({
       finished: false,
       doneEmitted: false,
       cancelled: false,
-      retried: true,
+      retries: MAX_RETRIES, // a rescue is never retried
       startedAt: now(),
     };
     contender.shadow = false;
@@ -2039,6 +2070,12 @@ function fallbackNote(note) {
   const from = text(note.from);
   const reason = text(note.reason);
   return { to, ...(from ? { from } : {}), ...(reason ? { reason } : {}) };
+}
+
+/** Whether a failed attempt gets another one: never after a refusal, and MAX_RETRIES in all. */
+function canRetry(target, err) {
+  if (err?.retryable === false) return false;
+  return target.retries < MAX_RETRIES;
 }
 
 function isAbort(err) {

@@ -114,9 +114,10 @@ test("a failed turn never becomes follow-up history, streamed text or not", asyn
   engine.onSessionStart({ sessionId: "s" });
   engine.onAnswerRequest({ utterance: "first question" });
   await waitFor(() => frames.some((frame) => frame.type === "turn.done"));
+  assert.equal(calls.length, 3, "the attempt and its two retries all failed");
   engine.onAnswerRequest({ utterance: "second question" });
-  await waitFor(() => calls.length === 2);
-  assert.ok(!calls[1].context.includes("RECENT EXCHANGE:"), "a partially-streamed FAILED turn is never recorded");
+  await waitFor(() => calls.length === 4);
+  assert.ok(!calls[3].context.includes("RECENT EXCHANGE:"), "a partially-streamed FAILED turn is never recorded");
   engine.onSessionEnd();
 });
 

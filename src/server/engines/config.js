@@ -15,6 +15,7 @@ import { parseAnswerCardsSwitch } from "../../shared/answer-cards.js";
 import { parseGlossarySwitch } from "./glossary.js";
 import { judgeOptionsFromEnv } from "./judge.js";
 import { scopedApiKey } from "./provider-http.js";
+import { CEREBRAS } from "./answer-models.js";
 
 const DEFAULT_OPENAI_ORIGIN = "https://api.openai.com";
 
@@ -23,14 +24,10 @@ const DEFAULT_OPENAI_ORIGIN = "https://api.openai.com";
  * variables that are still unset. Explicit settings always win, and each
  * vendor key is only ever sent to that vendor's own origin.
  */
-const CEREBRAS = Object.freeze({
-  baseUrl: "https://api.cerebras.ai/v1",
-  model: "qwen-3.8-27b",
-  // Reasoning on, so Qwen answers with thinking. Cerebras streams the
-  // reasoning in a separate field the answer stream never shows, and the first
-  // answer token still arrives in about 0.3-1.3 s. LLM_REASONING_EFFORT wins.
-  reasoningEffort: "high",
-});
+// The Cerebras preset lives in answer-models.js (CEREBRAS): reasoning on, so
+// Qwen answers with thinking. Cerebras streams the reasoning in a separate
+// field the answer stream never shows, and the first answer token still
+// arrives in about 0.3-1.3 s. LLM_REASONING_EFFORT wins.
 const GROQ = Object.freeze({
   baseUrl: "https://api.groq.com/openai/v1",
   asrModel: "whisper-large-v3-turbo",
@@ -317,8 +314,10 @@ export function buildEngineConfig(rawEnv = process.env, { mode, answerInstructio
       ? { apiKey: env.DEEPSEEK_API_KEY, knownTermsPath: present(knownTermsPath) ?? present(env.KNOWN_TERMS_PATH) ?? null }
       : null,
     deepseekApiKey: present(env.DEEPSEEK_API_KEY) ?? null,
-    // The Qwen default is the CEREBRAS_API_KEY preset above.
+    // The Qwen default is the CEREBRAS_API_KEY preset above; the key itself
+    // is the Cerebras rung of the stand-in ladder (index.js).
     cerebrasAvailable: Boolean(present(env.CEREBRAS_API_KEY)),
+    cerebrasApiKey: present(env.CEREBRAS_API_KEY) ?? null,
     asrProvider,
     asrOptions: {
       provider: asrProvider,
@@ -338,6 +337,10 @@ export function buildEngineConfig(rawEnv = process.env, { mode, answerInstructio
       temperature: env.LLM_TEMPERATURE ? Number(env.LLM_TEMPERATURE) : undefined,
       reasoningEffort: present(env.LLM_REASONING_EFFORT),
       promptMode,
+      // ANSWER_STALL_MS: how long a provider may send nothing before the
+      // answer is retried (answerer.js DEFAULT_STALL_MS when unset or not a
+      // positive integer).
+      ...(positiveInt(env.ANSWER_STALL_MS) ? { stallMs: positiveInt(env.ANSWER_STALL_MS) } : {}),
       ...(technicalSlot ? { routes: { technical: technicalSlot } } : {}),
       answerInstructionsPath: instructionsPath,
     },

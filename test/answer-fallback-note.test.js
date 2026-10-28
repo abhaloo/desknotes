@@ -34,6 +34,8 @@ test("the note names the stand-in first, then why, in a few words", () => {
   assert.equal(fallbackNoteText({ ...NOTE, reason: "key_rejected" }), "Fallback: DeepSeek Flash · Qwen 27B key rejected");
   assert.equal(fallbackNoteText({ ...NOTE, reason: "refused" }), "Fallback: DeepSeek Flash · Qwen 27B refused");
   assert.equal(fallbackNoteText({ ...NOTE, reason: "rate_limited" }), "Fallback: DeepSeek Flash · Qwen 27B rate-limited");
+  assert.equal(fallbackNoteText({ ...NOTE, reason: "stalled" }), "Fallback: DeepSeek Flash · Qwen 27B stalled");
+  assert.equal(fallbackNoteText({ ...NOTE, reason: "failed" }), "Fallback: DeepSeek Flash · Qwen 27B failed");
   assert.equal(
     fallbackNoteText({ to: "Qwen 27B", from: "DeepSeek Flash", reason: "no_key" }),
     "Fallback: Qwen 27B · no key for DeepSeek Flash",

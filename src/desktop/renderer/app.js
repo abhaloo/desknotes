@@ -527,10 +527,11 @@ function onAnswer(frame = {}) {
       if (terms.apply(data, answers.active?.id ?? null)) renderTerms();
       return;
     case "error.retry":
-      // The server is retrying a failed generation itself. Say so: the card
-      // sits empty until the second attempt answers.
+      // The server retries a failed generation itself: the card starts over
+      // (a stall may have painted half an answer) and says so.
+      answers.restart(data, Date.now());
       showToast(ANSWER_RETRY_TEXT, "info", 2600);
-      return;
+      break;
     case "error": {
       const text = answerErrorText(data);
       if (text) showToast(text, "error", 7000);
