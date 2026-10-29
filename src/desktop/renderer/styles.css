@@ -1235,6 +1235,34 @@ body[data-mode="practice"] {
   color: var(--muted);
 }
 .recap-history-row[data-unreadable] .recap-history-meta { color: var(--bad); }
+/* Search: the box above the list, the status line under it, and the matching snippet on a hit row. */
+.recap-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #0b0d12;
+  color: inherit;
+  border: 1px solid #2a3550;
+  border-radius: 6px;
+  font: inherit;
+}
+.recap-search:focus { outline: 1px solid var(--accent, #7aa2f7); }
+.recap-search-status { min-height: 1.2em; margin: 4px 0 0; }
+.recap-search-status:empty { display: none; }
+.recap-history-row:has(.recap-history-snippet) {
+  grid-template-areas:
+    "title open delete"
+    "meta open delete"
+    "snippet open delete";
+}
+.recap-history-snippet {
+  grid-area: snippet;
+  font-size: 0.85em;
+  color: var(--muted);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
 .recap-history-row [data-action="open"] { grid-area: open; }
 .recap-history-row [data-action="delete"] { grid-area: delete; }
 .recap-problem { color: var(--warn); }

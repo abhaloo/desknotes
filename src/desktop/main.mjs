@@ -40,6 +40,8 @@ import { createPracticeDebriefStore } from "./practice-debrief.js";
 import { createRecapRecorder } from "./recap/recorder.js";
 import { recapNotes } from "./recap/build.js";
 import { createRecapStore, isRecapId, summarizeRecap } from "./recap/store.js";
+import { createRecapSearch, searchPayload } from "./recap/search.js";
+import { createOnnxEmbedder } from "./recap/embedder.js";
 import { createQuestionSegmenter } from "./practice/segmenter.js";
 import { createPracticeSession } from "./practice/session.js";
 import { buildDebrief, formatDebrief } from "./practice/debrief.js";
@@ -144,6 +146,8 @@ const QUIT_STOP_TIMEOUT_MS = 2000;
 const RECAP_QUIT_TIMEOUT_MS = 3000;
 /** Recaps whose save failed stay readable for the run; this many at most. */
 const UNSAVED_RECAPS_MAX = 3;
+/** While the session is in one of these, recap search embeds nothing: the call path has the CPU. */
+const BUSY_SESSION_STATES = new Set([SESSION_STATES.LAUNCHING, SESSION_STATES.ACTIVE, SESSION_STATES.ENDING]);
 const AUDIO_SOURCES = Object.freeze(["microphone", "system"]);
 const boundAudioHosts = new WeakSet();
 
@@ -197,8 +201,8 @@ const state = {
   },
   /** Session recap recorder (recap/recorder.js): subscribes itself at boot; nothing on the call path knows it. */
   recap: null,
-  /** Session recaps on disk (recap/store.js), the latest one of this run, and the ones whose save failed. */
-  recaps: { store: null, latest: null, unsaved: new Map() },
+  /** Session recaps on disk (recap/store.js), the latest one of this run, the ones whose save failed, and the search index (recap/search.js). */
+  recaps: { store: null, latest: null, unsaved: new Map(), search: null },
   /** App settings (app-preferences.js). OFF until loaded: nothing auto-starts on a read we never did. */
   appPreferences: null,
   settings: { autoStart: false, answerModel: "", windowOpacity: WINDOW_OPACITY.default, readError: null },
@@ -1711,6 +1715,8 @@ function onBeforeQuit(event) {
   if (state.audio.quitTask) return;
   state.audio.quitTask = (async () => {
     invalidateAudioGeneration();
+    // Indexing a recap is never urgent: stop it now, no waiting (the next launch resumes from the sidecars).
+    void state.recaps.search?.dispose();
     const stop = stopSpeech();
     let timer = null;
     const timeout = new Promise((resolve) => {
@@ -2500,6 +2506,41 @@ function recapStore() {
   return state.recaps.store;
 }
 
+function recapSearchBusy() {
+  return BUSY_SESSION_STATES.has(state.status.lifecycle);
+}
+
+/**
+ * Session search (recap/search.js): the index beside the store, started once
+ * at boot. The local model (recap/embedder.js) loads lazily; without it the
+ * search matches words only. Status changes reach every window.
+ */
+function recapSearch() {
+  if (!state.recaps.search) {
+    state.recaps.search = createRecapSearch({
+      userDataDir: userDataDirectory(),
+      store: recapStore(),
+      embedder: createOnnxEmbedder(),
+      isBusy: recapSearchBusy,
+      onStatus: (status) => broadcast(IPC.RECAP_SEARCH_STATUS, status),
+      log: (entry) => warn(`recap search ${entry.type}: ${entry.message ?? ""}`),
+    });
+  }
+  return state.recaps.search;
+}
+
+/** recap:search { query } -> the matching sessions, best first, with a snippet each; the renderer joins them with recap:list. */
+async function queryRecapSearch(payload) {
+  const checked = searchPayload(payload);
+  if (!checked) return failEnvelope(ErrorCode.INVALID_PAYLOAD, "recap:search takes { query: string }.");
+  try {
+    return okEnvelope(await recapSearch().search(checked.query));
+  } catch (error) {
+    warn(`recap search failed: ${errorText(error)}`);
+    return failEnvelope("E_RECAP_SEARCH", "The session search failed.");
+  }
+}
+
 /**
  * The recorder finished a session. A recap whose save failed is kept in
  * memory for this run, so the button and the window still work; the save
@@ -2511,6 +2552,7 @@ function onRecapSaved({ id, recap, summary, saveError }) {
     while (state.recaps.unsaved.size > UNSAVED_RECAPS_MAX) state.recaps.unsaved.delete(state.recaps.unsaved.keys().next().value);
   }
   state.recaps.latest = summary ?? summarizeRecap(recap);
+  if (!saveError) recapSearch().enqueue(id);
   // `notes`: the recording hit its cap or stopped early (build.js recapNotes); the renderer shows them behind an icon.
   broadcast(IPC.RECAP_READY, { id, summary: state.recaps.latest, saveError: saveError ?? null, notes: recapNotes(recap) });
 }
@@ -2520,6 +2562,8 @@ async function queryRecapList() {
   let readError = null;
   try {
     ({ sessions, readError } = await recapStore().list());
+    // The folder was just read: line the search index up with it (a file removed or dropped in by hand).
+    if (!readError) void recapSearch().reconcile(sessions);
   } catch (error) {
     warn(`recap list failed: ${errorText(error)}`);
     readError = "The saved session recaps couldn't be listed.";
@@ -2572,11 +2616,13 @@ async function commandDeleteRecap(payload = {}) {
   try {
     if (all) {
       const { removed } = await recapStore().clear();
+      await recapSearch().clear();
       state.recaps.unsaved.clear();
       state.recaps.latest = null;
       return okEnvelope({ removed });
     }
     const { removed } = await recapStore().remove(payload.id);
+    await recapSearch().remove(payload.id);
     const held = state.recaps.unsaved.delete(payload.id);
     if (state.recaps.latest?.id === payload.id) state.recaps.latest = null;
     return okEnvelope({ removed: removed || held ? 1 : 0 });
@@ -2627,6 +2673,7 @@ function registerIpcRoutes() {
     [IPC.SETTINGS_GET]: () => querySettings(),
     [IPC.PRACTICE_GET]: () => queryPractice(),
     [IPC.RECAP_LIST]: () => queryRecapList(),
+    [IPC.RECAP_SEARCH]: (payload) => queryRecapSearch(payload),
     [IPC.RECAP_GET]: (payload) => queryRecap(payload),
   };
   const commands = {
@@ -3131,6 +3178,8 @@ async function bootstrap() {
     if (snapshot.state === SESSION_STATES.FAILED) {
       state.status.lastError = snapshot.error?.message ?? snapshot.reason ?? "session failed";
     }
+    // Recap search embeds only between calls (recapSearchBusy): the call over, it may go on.
+    if (snapshot.state === SESSION_STATES.ENDED || snapshot.state === SESSION_STATES.FAILED) state.recaps.search?.resume();
     broadcast(IPC.SESSION_STATE_CHANGED, rendererSnapshot(snapshot));
     broadcast(IPC.SPEECH_STATUS_CHANGED, {
       state: snapshot.state,
@@ -3180,6 +3229,8 @@ async function bootstrap() {
   await loadDesktopSettings();
   ensurePanelManager();
   registerIpcRoutes();
+  // Session search: the model loads and the index rebuilds in the background; boot never waits for it.
+  void recapSearch().start();
   state.windows.main = createMainWindow();
   state.windows.overlay = createOverlayWindow();
   registerShortcuts();

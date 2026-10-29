@@ -17,6 +17,8 @@
     "start:app": "electron src/desktop/main.mjs",
     "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "build:native-audio": "node scripts/build-audio-native.mjs",
+    "fetch:embedder": "node scripts/fetch-embedder.mjs",
+    "test:search:live": "node test/live/recap-search-embedder.mjs",
     "test:native-audio": "node scripts/test-audio-native.mjs",
     "test:audio:live": "electron test/live/wasapi-audio-probe.mjs",
     "dist:win": "node scripts/build-audio-native.mjs && electron-builder --win portable",

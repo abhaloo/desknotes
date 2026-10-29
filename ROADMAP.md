@@ -33,7 +33,8 @@ Work planned for DeskNotes, roughly in order. Estimates are rough.
 - **Session log switch in Settings (3 h).** Turn transcript logs on or off
   without an environment variable.
 - **Delete my data (2 h).** One action that removes logs, documents,
-  practice material and session recaps from the data folder.
+  practice material, session recaps and their search index
+  (`sessions-index`) from the data folder.
 - **Audio capture off on first launch (1 h).** A new install waits for you to
   turn capture on.
 

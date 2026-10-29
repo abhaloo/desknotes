@@ -97,6 +97,8 @@ const IPC = Object.freeze({
   RECAP_OPEN: "recap:open",
   RECAP_DELETE: "recap:delete",
   RECAP_READY: "recap:ready",
+  RECAP_SEARCH: "recap:search",
+  RECAP_SEARCH_STATUS: "recap:search-status",
 });
 
 const QUERY_CHANNELS = Object.freeze([
@@ -115,6 +117,7 @@ const QUERY_CHANNELS = Object.freeze([
   IPC.PRACTICE_GET,
   IPC.RECAP_LIST,
   IPC.RECAP_GET,
+  IPC.RECAP_SEARCH,
 ]);
 
 const COMMAND_CHANNELS = Object.freeze([
@@ -178,6 +181,7 @@ const BROADCAST_CHANNELS = Object.freeze([
   IPC.DISPLAY_CLEARED,
   IPC.SCREEN_ANALYSIS_STATE,
   IPC.RECAP_READY,
+  IPC.RECAP_SEARCH_STATUS,
 ]);
 
 const QUERIES = new Set(QUERY_CHANNELS);

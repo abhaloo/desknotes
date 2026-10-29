@@ -119,6 +119,8 @@ const els = {
   recapHistory: el("recap-history"),
   recapHistoryEmpty: el("recap-history-empty"),
   recapDeleteAll: el("recap-delete-all"),
+  recapSearch: el("recap-search"),
+  recapSearchStatus: el("recap-search-status"),
 };
 
 const answers = new AnswerBuffer();const transcripts = new TranscriptLanes();
@@ -256,7 +258,7 @@ const recapHistory = isControl
       bridge,
       confirm: (message) => window.confirm(message),
       showToast,
-      els: { list: els.recapHistory, empty: els.recapHistoryEmpty, deleteAll: els.recapDeleteAll },
+      els: { list: els.recapHistory, empty: els.recapHistoryEmpty, deleteAll: els.recapDeleteAll, search: els.recapSearch, status: els.recapSearchStatus },
       onRemoved: ({ id, all }) => {
         if (all || view.recapLatest?.id === id) {
           view.recapLatest = null;

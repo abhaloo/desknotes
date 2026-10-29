@@ -818,3 +818,95 @@ Session history** (`renderer/recap-history.js`) lists the saved sessions
 with Open and Delete, and Delete all; deleting asks first. The list is read
 again after a delete, on `recap:ready`, when Settings opens, when the window
 regains focus while Settings is open, and when Open finds the file gone.
+
+## Session search (additive) — `src/desktop/recap/search*.js`, `embedder.js`, `wordpiece.js`
+
+A search box in **Settings > Session history** filters the saved sessions
+by topic: "the call where they pushed back on pricing" finds the session
+whose transcript talks about cost and discounts, whatever words were used.
+A small sentence-embedding model runs on the PC (all-MiniLM-L6-v2 through
+onnxruntime-node, the runtime the VAD uses); nothing leaves the machine.
+Without the model (it is fetched by `scripts/fetch-embedder.mjs` and is not
+in the repository; `onnxruntime-node` is optional) the box matches words
+only, and says so.
+
+### IPC
+
+| Channel | Kind | Payload | Value |
+|---|---|---|---|
+| `recap:search` | query | `{ query: string }` | `{ query, hits: [{ id, score, snippet }], status }`: the matching sessions, best first, at most 50, each with a snippet read from its recap; `hits: []` for an empty query; `E_INVALID_PAYLOAD` for anything but a string query; `E_RECAP_SEARCH` when the search itself failed |
+| `recap:search-status` | broadcast | `status` | sent to every app window when the index changes: after boot, after each session read or embedded, after a delete, on fallback |
+
+`status = { mode: "starting" \| "semantic" \| "keyword", reason: string \| null, indexed: number, pending: number, total: number }`:
+`mode` is `keyword` when the model is absent or failed (`reason` says why);
+`indexed` sessions have vectors, `pending` ones wait to be read or embedded,
+`total` is every session the index knows. The renderer joins hits with its
+last `recap:list`: a hit for a session no longer listed is left out. Only the
+control window may call `recap:search` (the recap page keeps `recap:get`).
+
+### Index
+
+The sessions folder stays the only truth. The index is a derived cache:
+one sidecar per session in `<userData>/sessions-index/<id>.json` holding the
+chunk refs (line ranges, turn ids, term ranges), the session's words for the
+keyword boost, the unit vectors and the model they came from: **never
+transcript text**. Snippets are read from the recap file when a result is
+shown (a small cache). `reconcile(sessions)` runs on every `recap:list`: a
+session missing from the index or re-saved since (`savedAt`) is queued, one
+no longer on disk is dropped with its sidecar, a damaged sidecar is rebuilt.
+`recap:delete` drops entries and sidecars. Vectors from another model are
+re-embedded; the index is versioned (`SEARCH_INDEX_VERSION`).
+
+A queued session is searchable in two steps: by its words as soon as the
+file is read, by topic once its chunks are embedded. Embedding runs only
+between calls (`isBusy`: lifecycle `launching`, `active` or `ending`), is
+resumed on `ended`/`failed`, and is disposed without waiting on quit (the
+next launch resumes from the sidecars). A chunk that fails to embed leaves
+its session on its words and is logged; `SEARCH_MAX_FAILURES` (3) in a row
+put the run in keyword mode. Main never awaits the index at boot. A delete
+(`remove`, `clear`, or reconcile dropping an orphan) cancels the session
+being read or embedded at that moment, so its result never brings it back.
+
+Scoring is a flat cosine scan (unit vectors, so a dot product): a session
+scores its best chunk, plus `lexicalBoost` (0.2) times the share of query
+words found in it; hits under `threshold` (0.2) are dropped (measured with
+MiniLM: good matches 0.31-0.55, unrelated 0.0-0.15). Measured at
+~4 ms for 5k chunks and ~40-55 ms for 50k chunks of 384 dims (a year of
+calls is 25k-50k chunks), so an ANN library is deferred: `createSearchIndex`
+is the seam where one would go.
+
+What is embedded (`search-text.js`): transcript windows of ~180 words
+overlapping by one line (a line wider than the window is cut into word
+ranges), one chunk per detected question with its answer (tags stripped),
+the terms explained, each screen analysis; at most 1,000 chunks. Gate
+verdicts, first-token markers, retries, superseded markers and error codes
+are never indexed.
+
+```js
+// recap/search-text.js — pure, no node: imports
+export function searchChunks(recap, { chunkWords, maxChunks }) // -> [{ kind: transcript|qa|terms|screen, text, ref }]
+export function chunkText(recap, ref), snippetFor(recap, ref)  // the words again, from the recap alone ("" when the ref no longer fits)
+export function lexicalWords(texts), queryWords(query), normalizeQuery(query)
+
+// recap/search-index.js — pure
+export function createSearchIndex({ dims }) // -> { add(id, { savedAt, model, chunks, vectors|null, words }), remove, clear, has, size, ids, entry, query({ vector|null, words, threshold, lexicalBoost, limit }) -> [{ id, score, semantic, lexical, chunk }] }
+export function encodeSidecar(entry), decodeSidecar(text) // null for anything damaged
+
+// recap/wordpiece.js — BERT uncased WordPiece, pure
+export function createWordPiece({ vocab, maxTokens }) // -> { encode(text) -> { ids, mask }, vocabSize, padId }
+
+// recap/embedder.js — onnxruntime-node, lazily
+export function createOnnxEmbedder({ dir, model, fs, loadRuntime, batchSize }) // -> { create() -> { id, dims, embed(texts), embedQuery(text), dispose() } }
+//   create() rejects with E_EMBEDDER_UNAVAILABLE (no runtime, no model folder, bad vocab, load failed);
+//   embed() rejects with E_EMBEDDER_FAILED. Mean pooling over the mask, L2-normalised. Single-threaded.
+
+// recap/search.js — main-side orchestrator
+export function createRecapSearch({ userDataDir, store, embedder: { create }, isBusy, fs, log, onStatus, options })
+//   -> { start(), reconcile(sessions?), enqueue(id), remove(id), clear(), search(query), status(), resume(), settled(), dispose() }
+export function searchPayload(payload) // { query } or null
+```
+
+Tests use `test/fixtures/fake-embedder.js`, a deterministic hashed bag of
+words with a synonym table (cost ≈ pricing), so ranking by topic is asserted
+without a model or the network. The real model is checked by hand with
+`node test/live/recap-search-embedder.mjs`.

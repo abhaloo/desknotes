@@ -292,6 +292,9 @@
               <span>Save a recap of each session</span>
             </label>
             <p class="meta">When a live session ends, its transcript, the answers, the questions detected and the terms are saved in the sessions folder. Practice is never saved. Turning this off keeps the recaps already saved.</p>
+            <!-- Search by topic (src/desktop/recap/search.js): a local model on your PC; without it, words are matched. -->
+            <input id="recap-search" class="recap-search" type="search" placeholder="Search sessions by topic…" aria-label="Search sessions by topic" autocomplete="off" spellcheck="false" />
+            <p id="recap-search-status" class="meta recap-search-status"></p>
             <ul id="recap-history" class="recap-history"></ul>
             <p id="recap-history-empty" class="meta">No saved sessions yet.</p>
             <div class="audio-actions">

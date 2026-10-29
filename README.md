@@ -50,6 +50,10 @@ speech to text (Groq Whisper) and answers (DeepSeek or Cerebras).
   decision the model made, the questions it detected, the gaps (answers that
   failed, were cut short or never finished) and the terms it explained.
   **Settings > Session history** lists every saved session.
+- **Finds old calls by topic.** Type what the call was about ("pushed back
+  on pricing", "single sign-on") in the Session history search box and the
+  matching sessions come up, with the line that matched. A small sentence
+  model runs on your PC; nothing leaves it.
 
 ## How it stays fast
 
@@ -226,6 +230,21 @@ Practice sessions and sessions where nothing was said are not saved. Turn
 **Save a recap of each session** off in Settings to stop saving new recaps;
 the ones already saved stay until you delete them.
 
+**Session search stays on your PC.** The search box in Session history uses
+a small sentence-embedding model (all-MiniLM-L6-v2) that runs locally
+through ONNX Runtime; no transcript or query is sent anywhere. To make
+search fast, DeskNotes keeps a search index beside the recaps, in the
+`sessions-index` folder: one small file per session with the positions of
+the passages it indexed, the words they contain, and the numeric vectors the
+model computed for them. It holds no transcript text; the lines you see in a
+result are read from the recap itself. Deleting a session (or Delete all)
+removes its index file too, and a recap you delete by hand leaves the index
+the next time the list is shown. The index is rebuilt from the recaps if it
+is ever missing or damaged. The model is not part of the repository: run
+`node scripts/fetch-embedder.mjs` once to download it (about 23 MB, from
+huggingface.co). Without it, the search box still works but matches words
+only, and says so.
+
 Session logs (diagnostic, event by event) are off by default. If you set
 `SESSION_TELEMETRY=1`, DeskNotes writes logs with transcripts and answers to
 `logs\telemetry` in that folder and deletes them after 7 days. Set
@@ -243,6 +262,7 @@ for a screen analysis.
 | `src/server` | Embedded realtime server and engines: speech to text, judge, answers, Terms, screen analysis |
 | `src/transport` | WebSocket client with reconnect and replay |
 | `src/audio`, `src/vad` | Capture pipeline and voice activity detection |
+| `src/desktop/recap` | Session recaps and their search: store, timeline, builder, local embedder, index |
 | `native` | WASAPI audio capture addon (C++) |
 | `test` | Unit and integration tests |
 | `bench` | Latency and answer-quality benchmarks |

@@ -73,6 +73,21 @@ export function historyRowView(summary = {}, { formatTime = localTime } = {}) {
   };
 }
 
+/**
+ * The line under the Session history search box. Nothing while idle; while a
+ * query is active, how many match, then what the index cannot do yet: words
+ * only (no local model), or how far the background indexing is.
+ * @param {{ searching: boolean, matches: number, total: number, status: object|null }} view
+ */
+export function searchStatusText({ searching = false, matches = 0, total = 0, status = null } = {}) {
+  const parts = [];
+  if (searching) parts.push(`${matches} of ${count(total, "session")} match.`);
+  if (!searching) return "";
+  if (status?.mode === "keyword") parts.push("Matching words only: the local search model isn't installed.");
+  else if (status && status.pending > 0) parts.push(`Indexing ${status.indexed} of ${count(status.total, "session")}…`);
+  return parts.join(" ");
+}
+
 /** The "Session recap" button: the latest recap, shown while no session is starting or live. */
 export function recapButtonView({ latest = null, lifecycle = "idle" } = {}) {
   const id = typeof latest?.id === "string" ? latest.id : null;

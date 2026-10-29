@@ -122,6 +122,9 @@ export const IPC = Object.freeze({
   RECAP_OPEN: "recap:open",
   RECAP_DELETE: "recap:delete",
   RECAP_READY: "recap:ready",
+  // session search (additive): Settings > Session history search box (src/desktop/recap/search.js)
+  RECAP_SEARCH: "recap:search",
+  RECAP_SEARCH_STATUS: "recap:search-status",
 });
 
 export const QUERY_CHANNELS = Object.freeze([
@@ -140,6 +143,7 @@ export const QUERY_CHANNELS = Object.freeze([
   IPC.PRACTICE_GET,
   IPC.RECAP_LIST,
   IPC.RECAP_GET,
+  IPC.RECAP_SEARCH,
 ]);
 
 export const COMMAND_CHANNELS = Object.freeze([
@@ -203,6 +207,7 @@ export const BROADCAST_CHANNELS = Object.freeze([
   IPC.DISPLAY_CLEARED,
   IPC.SCREEN_ANALYSIS_STATE,
   IPC.RECAP_READY,
+  IPC.RECAP_SEARCH_STATUS,
 ]);
 
 export function okEnvelope(value = null) {
